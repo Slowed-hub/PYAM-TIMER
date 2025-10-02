@@ -13,8 +13,12 @@ const BLACK_PHASE_DURATION = 5 * 60 * 1000;   // 5 min
 const RED_LIGHT_INTERVAL = 24 * 60 * 1000;    // 24 min/voyant
 const GREEN_LIGHT_INTERVAL = 12 * 60 * 1000;  // 12 min/voyant
 
-// Référence en UTC
-const REFERENCE_TIME = Date.parse("2025-01-02T01:05:56Z");
+// ------------------------------
+// 🔹 Référence du début du cycle
+// Ajuste ici ton heure locale de départ
+// Exemple : je veux 02:05:56 locale, fuseau UTC+1 → UTC = 01:05:56
+const REFERENCE_TIME = Date.parse("2025-10-02T22:41:06Z"); // UTC
+// ------------------------------
 
 let state = {
   phase: "FERME",
@@ -103,19 +107,24 @@ function syncState() {
   return cycle;
 }
 
-// --- Embed Discord ---
+// --- Embed Discord avec heures UTC et locale ---
 function buildEmbed(cycle) {
   const remainingMs = cycle.endTime - Date.now();
   const min = Math.floor(remainingMs / 60000);
   const sec = Math.floor((remainingMs % 60000) / 1000);
   const countdown = cycle.phase === "FERME" ? `${min} min` : `${min} min ${sec}s`;
 
+  const serverUTC = new Date().toISOString();
+  const serverLocal = new Date().toLocaleString();
+
   return new EmbedBuilder()
     .setTitle("Executive Hangar Status :")
     .setColor(cycle.phase === "FERME" ? "Red" : cycle.phase === "OUVERT" ? "Green" : "Yellow")
     .addFields(
       { name: "Voyants :", value: state.lights.join(" "), inline: false },
-      { name: cycle.phase === "FERME" ? "HANGAR FERMÉ 🔴" : cycle.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown }
+      { name: cycle.phase === "FERME" ? "HANGAR FERMÉ 🔴" : cycle.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown },
+      { name: "Heure serveur (UTC)", value: serverUTC, inline: true },
+      { name: "Heure serveur (locale)", value: serverLocal, inline: true }
     );
 }
 
@@ -149,6 +158,7 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
+
 
 
 
