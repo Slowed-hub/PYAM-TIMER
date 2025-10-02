@@ -133,4 +133,5 @@ client.once("ready", async () => {
   }, 1000);
 });
 
-client.login(TOKEN);
+client.login(process.env.TOKEN);
+
