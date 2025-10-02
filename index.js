@@ -59,7 +59,7 @@ function getCurrentCycle() {
   return { phase: "FERME", startTime: blackEnd, endTime: blackEnd + RED_PHASE_DURATION };
 }
 
-// --- Mise à jour fluide des voyants ---
+// --- Mise à jour fluide des voyants (droite à gauche) ---
 function updateLights() {
   const now = Date.now();
   const { phase, startTime } = state;
@@ -70,19 +70,23 @@ function updateLights() {
     currentIndex = Math.floor((now - startTime) / RED_LIGHT_INTERVAL);
     if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
     progress = ((now - startTime) % RED_LIGHT_INTERVAL) / RED_LIGHT_INTERVAL;
+
     for (let i = 0; i < LIGHTS_COUNT; i++) {
-      if (i < currentIndex) state.lights[i] = "🟩";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[i] = progress > 0.5 ? "🟩" : "🟥";
-      else state.lights[i] = "🟥";
+      const idx = LIGHTS_COUNT - 1 - i; // inverser l'ordre pour commencer à droite
+      if (i < currentIndex) state.lights[idx] = "🟩";
+      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟩" : "🟥";
+      else state.lights[idx] = "🟥";
     }
   } else if (phase === "OUVERT") {
     currentIndex = Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL);
     if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
     progress = ((now - startTime) % GREEN_LIGHT_INTERVAL) / GREEN_LIGHT_INTERVAL;
+
     for (let i = 0; i < LIGHTS_COUNT; i++) {
-      if (i < currentIndex) state.lights[i] = "⬛";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[i] = progress > 0.5 ? "⬛" : "🟩";
-      else state.lights[i] = "🟩";
+      const idx = LIGHTS_COUNT - 1 - i; // inverser l'ordre pour commencer à droite
+      if (i < currentIndex) state.lights[idx] = "⬛";
+      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "⬛" : "🟩";
+      else state.lights[idx] = "🟩";
     }
   } else {
     state.lights = Array(LIGHTS_COUNT).fill("⬛");
@@ -134,4 +138,5 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
+
 
