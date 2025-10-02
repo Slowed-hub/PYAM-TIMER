@@ -13,14 +13,16 @@ const BLACK_PHASE_DURATION = 5 * 60 * 1000;   // 5 min
 const RED_LIGHT_INTERVAL = 24 * 60 * 1000;    // 24 min/voyant
 const GREEN_LIGHT_INTERVAL = 12 * 60 * 1000;  // 12 min/voyant
 
-const REFERENCE_TIME = new Date("2025-01-02T01:05:56").getTime();
+// Référence en UTC
+const REFERENCE_TIME = Date.parse("2025-01-02T01:05:56Z");
 
 let state = {
   phase: "FERME",
-  lights: Array(LIGHTS_COUNT).fill("🟥")
+  lights: Array(LIGHTS_COUNT).fill("🟥"),
+  messageId: null
 };
 
-// --- Charger les voyants persistés si disponibles ---
+// --- Charger la persistance si disponible ---
 if (fs.existsSync(DATA_FILE)) {
   try {
     const data = fs.readFileSync(DATA_FILE, "utf-8");
@@ -28,21 +30,22 @@ if (fs.existsSync(DATA_FILE)) {
     if (json.lights && Array.isArray(json.lights) && json.lights.length === LIGHTS_COUNT) {
       state.lights = json.lights;
     }
+    if (json.messageId) state.messageId = json.messageId;
   } catch (err) {
     console.error("Erreur lecture JSON :", err);
   }
 }
 
-// --- Sauvegarder uniquement les voyants ---
+// --- Sauvegarder la persistance ---
 function saveState() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ lights: state.lights }, null, 2));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ lights: state.lights, messageId: state.messageId }, null, 2));
   } catch (err) {
     console.error("Erreur écriture JSON :", err);
   }
 }
 
-// --- Calcul du cycle actuel depuis REFERENCE_TIME ---
+// --- Calcul du cycle actuel en UTC ---
 function getCurrentCycle() {
   const now = Date.now();
   const totalCycle = RED_PHASE_DURATION + GREEN_PHASE_DURATION + BLACK_PHASE_DURATION;
@@ -59,7 +62,7 @@ function getCurrentCycle() {
   return { phase: "FERME", startTime: blackEnd, endTime: blackEnd + RED_PHASE_DURATION };
 }
 
-// --- Mise à jour fluide des voyants ---
+// --- Mise à jour des voyants ---
 function updateLights(cycle) {
   const now = Date.now();
   const { phase, startTime } = cycle;
@@ -67,10 +70,9 @@ function updateLights(cycle) {
   let progress = 0;
 
   if (phase === "FERME") {
-    currentIndex = Math.floor((now - startTime) / RED_LIGHT_INTERVAL);
+    currentIndex = Math.max(0, Math.floor((now - startTime) / RED_LIGHT_INTERVAL));
     if (currentIndex >= LIGHTS_COUNT) currentIndex = LIGHTS_COUNT - 1;
     progress = ((now - startTime) % RED_LIGHT_INTERVAL) / RED_LIGHT_INTERVAL;
-
     for (let i = 0; i < LIGHTS_COUNT; i++) {
       const idx = LIGHTS_COUNT - 1 - i;
       if (i < currentIndex) state.lights[idx] = "🟩";
@@ -78,10 +80,9 @@ function updateLights(cycle) {
       else state.lights[idx] = "🟥";
     }
   } else if (phase === "OUVERT") {
-    currentIndex = Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL);
+    currentIndex = Math.max(0, Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL));
     if (currentIndex >= LIGHTS_COUNT) currentIndex = LIGHTS_COUNT - 1;
     progress = ((now - startTime) % GREEN_LIGHT_INTERVAL) / GREEN_LIGHT_INTERVAL;
-
     for (let i = 0; i < LIGHTS_COUNT; i++) {
       const idx = LIGHTS_COUNT - 1 - i;
       if (i < currentIndex) state.lights[idx] = "⬛";
@@ -93,7 +94,7 @@ function updateLights(cycle) {
   }
 }
 
-// --- Synchronisation globale ---
+// --- Synchronisation ---
 function syncState() {
   const cycle = getCurrentCycle();
   state.phase = cycle.phase;
@@ -102,7 +103,7 @@ function syncState() {
   return cycle;
 }
 
-// --- Création de l’embed Discord ---
+// --- Embed Discord ---
 function buildEmbed(cycle) {
   const remainingMs = cycle.endTime - Date.now();
   const min = Math.floor(remainingMs / 60000);
@@ -120,22 +121,35 @@ function buildEmbed(cycle) {
 
 // --- Client Discord ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-let messageInstance;
 
 client.once("ready", async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
-
   const channel = await client.channels.fetch(CHANNEL_ID);
-  const cycle = syncState();
-  messageInstance = await channel.send({ embeds: [buildEmbed(cycle)] });
 
-  setInterval(() => {
+  let messageInstance;
+  if (state.messageId) {
+    try {
+      messageInstance = await channel.messages.fetch(state.messageId);
+    } catch (err) {
+      console.log("Message non trouvé, envoi d'un nouveau message");
+      messageInstance = await channel.send({ embeds: [buildEmbed(syncState())] });
+      state.messageId = messageInstance.id;
+      saveState();
+    }
+  } else {
+    messageInstance = await channel.send({ embeds: [buildEmbed(syncState())] });
+    state.messageId = messageInstance.id;
+    saveState();
+  }
+
+  setInterval(async () => {
     const cycle = syncState();
-    if (messageInstance) messageInstance.edit({ embeds: [buildEmbed(cycle)] });
-  }, 1000);
+    if (messageInstance) await messageInstance.edit({ embeds: [buildEmbed(cycle)] });
+  }, 2000); // update toutes les 2s
 });
 
 client.login(process.env.TOKEN);
+
 
 
 
