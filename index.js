@@ -12,7 +12,7 @@ const client = new Client({
 // Variables globales
 let currentStatus = 'OFFLINE';
 let currentPhaseStart = null;
-let lights = ['🔴', '🔴', '🔴', '🔴', '🔴'];
+let lights = ['🟥', '🟥', '🟥', '🟥', '🟥']; // Utilisation de carrés rouges
 let timerMessageId = null;
 const channelId = '1423026396741107772'; // Remplacez par l'ID du canal Discord
 const cyclesFile = 'cycles.json';
@@ -69,20 +69,20 @@ function formatTimeRemaining(ms) {
 function updateLights(phaseProgress) {
   if (currentStatus === 'OFFLINE') {
     const lightsToTurnGreen = Math.floor(phaseProgress / (24 * 60 * 1000)); // 24 minutes par voyant
-    lights = lights.map((light, index) => index < lightsToTurnGreen ? '🟢' : '🔴');
+    lights = lights.map((light, index) => index < lightsToTurnGreen ? '🟩' : '🟥'); // Carré vert pour Online
   } else if (currentStatus === 'ONLINE') {
     const lightsToTurnOff = Math.floor(phaseProgress / (12 * 60 * 1000)); // 12 minutes par voyant
-    lights = lights.map((light, index) => index >= (5 - lightsToTurnOff) ? '⬛' : '🟢');
+    lights = lights.map((light, index) => index >= (5 - lightsToTurnOff) ? '⬛' : '🟩'); // Carré noir pour éteint
   } else if (currentStatus === 'RESTART') {
-    lights = ['⬛', '⬛', '⬛', '⬛', '⬛'];
+    lights = ['⬛', '⬛', '⬛', '⬛', '⬛']; // Tous carrés noirs
   }
 }
 
 // Générer le message Discord
 function generateMessage(remainingTime) {
   const statusText = {
-    OFFLINE: 'HANGAR CLOSED 🔴',
-    ONLINE: 'HANGAR OPEN 🟢',
+    OFFLINE: 'HANGAR CLOSED 🟥',
+    ONLINE: 'HANGAR OPEN 🟩',
     RESTART: 'RESTART 🟡'
   };
   const timerText = {
@@ -171,6 +171,7 @@ app.listen(port, () => {
 
 // Connexion du bot Discord
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
