@@ -4,93 +4,98 @@ const fs = require("fs");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
+
 const DATA_FILE = "timer.json";
 
+// --- Durées du cycle ---
 const LIGHTS_COUNT = 5;
 const RED_PHASE_DURATION = 120 * 60 * 1000;   // 120 min
 const GREEN_PHASE_DURATION = 60 * 60 * 1000;  // 60 min
 const BLACK_PHASE_DURATION = 5 * 60 * 1000;   // 5 min
-const RED_LIGHT_INTERVAL = 24 * 60 * 1000;    // 24 min/voyant
-const GREEN_LIGHT_INTERVAL = 12 * 60 * 1000;  // 12 min/voyant
+const TOTAL_CYCLE = RED_PHASE_DURATION + GREEN_PHASE_DURATION + BLACK_PHASE_DURATION;
 
-// ------------------------------
-// 🔹 Référence du début du cycle
-// Ajuste ici ton heure locale de départ
-// Exemple : je veux 02:05:56 locale, fuseau UTC+1 → UTC = 01:05:56
-const REFERENCE_TIME = Date.parse("2025-10-02T22:41:06Z"); // UTC
-// ------------------------------
+const RED_LIGHT_INTERVAL = RED_PHASE_DURATION / LIGHTS_COUNT;
+const GREEN_LIGHT_INTERVAL = GREEN_PHASE_DURATION / LIGHTS_COUNT;
 
+// --- État ---
 let state = {
   phase: "FERME",
-  lights: Array(LIGHTS_COUNT).fill("🟥"),
-  messageId: null
+  startTime: Date.now(),
+  endTime: Date.now(),
+  lights: Array(LIGHTS_COUNT).fill("🟥")
 };
 
-// --- Charger la persistance si disponible ---
+// --- Persistance minimale (voyants uniquement) ---
 if (fs.existsSync(DATA_FILE)) {
   try {
     const data = fs.readFileSync(DATA_FILE, "utf-8");
-    const json = JSON.parse(data);
-    if (json.lights && Array.isArray(json.lights) && json.lights.length === LIGHTS_COUNT) {
-      state.lights = json.lights;
-    }
-    if (json.messageId) state.messageId = json.messageId;
+    if (data) state = { ...state, ...JSON.parse(data) };
   } catch (err) {
     console.error("Erreur lecture JSON :", err);
   }
 }
 
-// --- Sauvegarder la persistance ---
 function saveState() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ lights: state.lights, messageId: state.messageId }, null, 2));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ lights: state.lights }, null, 2));
   } catch (err) {
     console.error("Erreur écriture JSON :", err);
   }
 }
 
-// --- Calcul du cycle actuel en UTC ---
+// --- Calcul du cycle basé sur l'heure actuelle ---
 function getCurrentCycle() {
   const now = Date.now();
-  const totalCycle = RED_PHASE_DURATION + GREEN_PHASE_DURATION + BLACK_PHASE_DURATION;
-  const elapsedSinceRef = now - REFERENCE_TIME;
-  const cycleStart = REFERENCE_TIME + Math.floor(elapsedSinceRef / totalCycle) * totalCycle;
+  const elapsedInCycle = now % TOTAL_CYCLE; // toujours entre 0 et TOTAL_CYCLE
 
-  const redEnd = cycleStart + RED_PHASE_DURATION;
-  const greenEnd = redEnd + GREEN_PHASE_DURATION;
-  const blackEnd = greenEnd + BLACK_PHASE_DURATION;
-
-  if (now < redEnd) return { phase: "FERME", startTime: cycleStart, endTime: redEnd };
-  if (now < greenEnd) return { phase: "OUVERT", startTime: redEnd, endTime: greenEnd };
-  if (now < blackEnd) return { phase: "RESTART", startTime: greenEnd, endTime: blackEnd };
-  return { phase: "FERME", startTime: blackEnd, endTime: blackEnd + RED_PHASE_DURATION };
+  if (elapsedInCycle < RED_PHASE_DURATION) {
+    return {
+      phase: "FERME",
+      startTime: now - elapsedInCycle,
+      endTime: now - elapsedInCycle + RED_PHASE_DURATION
+    };
+  }
+  if (elapsedInCycle < RED_PHASE_DURATION + GREEN_PHASE_DURATION) {
+    return {
+      phase: "OUVERT",
+      startTime: now - (elapsedInCycle - RED_PHASE_DURATION),
+      endTime: now - (elapsedInCycle - RED_PHASE_DURATION) + GREEN_PHASE_DURATION
+    };
+  }
+  return {
+    phase: "RESTART",
+    startTime: now - (elapsedInCycle - RED_PHASE_DURATION - GREEN_PHASE_DURATION),
+    endTime: now - (elapsedInCycle - RED_PHASE_DURATION - GREEN_PHASE_DURATION) + BLACK_PHASE_DURATION
+  };
 }
 
-// --- Mise à jour des voyants ---
-function updateLights(cycle) {
+// --- Mise à jour fluide des voyants ---
+function updateLights() {
   const now = Date.now();
-  const { phase, startTime } = cycle;
+  const { phase, startTime } = state;
   let currentIndex = 0;
   let progress = 0;
 
   if (phase === "FERME") {
-    currentIndex = Math.max(0, Math.floor((now - startTime) / RED_LIGHT_INTERVAL));
-    if (currentIndex >= LIGHTS_COUNT) currentIndex = LIGHTS_COUNT - 1;
+    currentIndex = Math.floor((now - startTime) / RED_LIGHT_INTERVAL);
+    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
     progress = ((now - startTime) % RED_LIGHT_INTERVAL) / RED_LIGHT_INTERVAL;
+
     for (let i = 0; i < LIGHTS_COUNT; i++) {
       const idx = LIGHTS_COUNT - 1 - i;
       if (i < currentIndex) state.lights[idx] = "🟩";
-      else if (i === currentIndex) state.lights[idx] = progress > 0.5 ? "🟩" : "🟥";
+      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟩" : "🟥";
       else state.lights[idx] = "🟥";
     }
   } else if (phase === "OUVERT") {
-    currentIndex = Math.max(0, Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL));
-    if (currentIndex >= LIGHTS_COUNT) currentIndex = LIGHTS_COUNT - 1;
+    currentIndex = Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL);
+    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
     progress = ((now - startTime) % GREEN_LIGHT_INTERVAL) / GREEN_LIGHT_INTERVAL;
+
     for (let i = 0; i < LIGHTS_COUNT; i++) {
       const idx = LIGHTS_COUNT - 1 - i;
       if (i < currentIndex) state.lights[idx] = "⬛";
-      else if (i === currentIndex) state.lights[idx] = progress > 0.5 ? "⬛" : "🟩";
+      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "⬛" : "🟩";
       else state.lights[idx] = "🟩";
     }
   } else {
@@ -102,64 +107,50 @@ function updateLights(cycle) {
 function syncState() {
   const cycle = getCurrentCycle();
   state.phase = cycle.phase;
-  updateLights(cycle);
-  saveState();
-  return cycle;
+  state.startTime = cycle.startTime;
+  state.endTime = cycle.endTime;
+  updateLights();
 }
 
-// --- Embed Discord avec heures UTC et locale ---
-function buildEmbed(cycle) {
-  const remainingMs = cycle.endTime - Date.now();
+// --- Embed Discord ---
+function buildEmbed() {
+  const remainingMs = state.endTime - Date.now();
   const min = Math.floor(remainingMs / 60000);
   const sec = Math.floor((remainingMs % 60000) / 1000);
-  const countdown = cycle.phase === "FERME" ? `${min} min` : `${min} min ${sec}s`;
 
-  const serverUTC = new Date().toISOString();
-  const serverLocal = new Date().toLocaleString();
+  const countdown = state.phase === "FERME" ? `${min} min` : `${min} min ${sec}s`;
 
   return new EmbedBuilder()
     .setTitle("Executive Hangar Status :")
-    .setColor(cycle.phase === "FERME" ? "Red" : cycle.phase === "OUVERT" ? "Green" : "Yellow")
+    .setColor(state.phase === "FERME" ? "Red" : state.phase === "OUVERT" ? "Green" : "Yellow")
     .addFields(
       { name: "Voyants :", value: state.lights.join(" "), inline: false },
-      { name: cycle.phase === "FERME" ? "HANGAR FERMÉ 🔴" : cycle.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown },
-      { name: "Heure serveur (UTC)", value: serverUTC, inline: true },
-      { name: "Heure serveur (locale)", value: serverLocal, inline: true }
+      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : state.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown },
+      { name: "Heure serveur (UTC)", value: new Date().toISOString(), inline: false },
+      { name: "Heure serveur (locale)", value: new Date().toLocaleString(), inline: false }
     );
 }
 
 // --- Client Discord ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+let messageInstance;
 
 client.once("ready", async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
+  syncState();
+  saveState();
+
   const channel = await client.channels.fetch(CHANNEL_ID);
+  messageInstance = await channel.send({ embeds: [buildEmbed()] });
 
-  let messageInstance;
-  if (state.messageId) {
-    try {
-      messageInstance = await channel.messages.fetch(state.messageId);
-    } catch (err) {
-      console.log("Message non trouvé, envoi d'un nouveau message");
-      messageInstance = await channel.send({ embeds: [buildEmbed(syncState())] });
-      state.messageId = messageInstance.id;
-      saveState();
-    }
-  } else {
-    messageInstance = await channel.send({ embeds: [buildEmbed(syncState())] });
-    state.messageId = messageInstance.id;
+  setInterval(() => {
+    syncState();
     saveState();
-  }
-
-  setInterval(async () => {
-    const cycle = syncState();
-    if (messageInstance) await messageInstance.edit({ embeds: [buildEmbed(cycle)] });
-  }, 2000); // update toutes les 2s
+    if (messageInstance) messageInstance.edit({ embeds: [buildEmbed()] });
+  }, 1000);
 });
 
 client.login(process.env.TOKEN);
-
-
 
 
 
