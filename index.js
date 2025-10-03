@@ -59,7 +59,7 @@ function formatTimeRemaining(ms) {
   const remainingMinutes = minutes % 60;
 
   if (currentStatus === 'OFFLINE') {
-    return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`; // Ajout des secondes pour OFFLINE
+    return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`; // Heures, minutes, secondes pour OFFLINE
   } else {
     return `${remainingMinutes}m ${remainingSeconds}s`; // Minutes et secondes pour ONLINE et RESTART
   }
@@ -170,12 +170,4 @@ app.listen(port, () => {
 });
 
 // Connexion du bot Discord
-lient.login(process.env.DISCORD_TOKEN);
-
-
-
-
-
-
-
-
+client.login(process.env.DISCORD_TOKEN); // Utilisation de la variable d'environnement
