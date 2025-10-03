@@ -15,7 +15,7 @@ const CYCLE_CONFIG = {
 };
 
 // Temps de référence (début de la phase rouge : 2 janvier 2025, 01:05:56)
-const REFERENCE_TIME = new Date("2025-01-02T01:05:56").getTime();
+const REFERENCE_TIME = new Date("2025-01-02T01:05:56Z").getTime();
 const TOTAL_CYCLE = CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION + CYCLE_CONFIG.BLACK_PHASE_DURATION;
 
 // --- État ---
@@ -30,15 +30,13 @@ let state = {
 function getLightState(index, phase, currentLightIndex) {
   if (phase === "FERME") {
     if (index < currentLightIndex) return "🟩"; // Voyant vert
-    if (index === currentLightIndex) return "🟥"; // Voyant actif reste rouge
-    return "🟥"; // Voyants restants rouges
+    return "🟥"; // Voyant actif ou restant rouge
   }
   if (phase === "OUVERT") {
     // Inverser l'ordre : commencer par le voyant 5 (index 4) et finir par le voyant 1 (index 0)
     const reversedCurrentIndex = CYCLE_CONFIG.LIGHTS_COUNT - 1 - currentLightIndex;
     if (index > reversedCurrentIndex) return "⬛"; // Voyants à droite du voyant actif sont noirs
-    if (index === reversedCurrentIndex) return "🟩"; // Voyant actif est vert
-    return "🟩"; // Voyants à gauche sont verts
+    return "🟩"; // Voyant actif et à gauche sont verts
   }
   return "⬛"; // Tous les voyants noirs en phase de restart
 }
@@ -59,33 +57,30 @@ function formatTime(minutes, showSeconds = false) {
 function getCurrentCycle() {
   const now = Date.now();
   const timeSinceReference = now - REFERENCE_TIME;
-  const cyclePosition = timeSinceReference % TOTAL_CYCLE;
+  const cyclePosition = (timeSinceReference % TOTAL_CYCLE + TOTAL_CYCLE) % TOTAL_CYCLE; // Éviter les valeurs négatives
   const cyclePositionMinutes = cyclePosition / 60000;
 
-  let phase, phaseTimeRemaining, currentLightIndex, lightTimeRemaining;
+  let phase, phaseTimeRemaining, currentLightIndex;
 
   if (cyclePositionMinutes < CYCLE_CONFIG.RED_PHASE_DURATION / 60000) {
     // Phase rouge
     phase = "FERME";
     phaseTimeRemaining = CYCLE_CONFIG.RED_PHASE_DURATION / 60000 - cyclePositionMinutes;
     currentLightIndex = Math.floor(cyclePositionMinutes / (CYCLE_CONFIG.RED_LIGHT_INTERVAL / 60000));
-    lightTimeRemaining = CYCLE_CONFIG.RED_LIGHT_INTERVAL / 60000 - (cyclePositionMinutes % (CYCLE_CONFIG.RED_LIGHT_INTERVAL / 60000));
   } else if (cyclePositionMinutes < (CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION) / 60000) {
     // Phase verte
     phase = "OUVERT";
     const greenPhasePosition = cyclePositionMinutes - CYCLE_CONFIG.RED_PHASE_DURATION / 60000;
     phaseTimeRemaining = CYCLE_CONFIG.GREEN_PHASE_DURATION / 60000 - greenPhasePosition;
     currentLightIndex = Math.floor(greenPhasePosition / (CYCLE_CONFIG.GREEN_LIGHT_INTERVAL / 60000));
-    lightTimeRemaining = CYCLE_CONFIG.GREEN_LIGHT_INTERVAL / 60000 - (greenPhasePosition % (CYCLE_CONFIG.GREEN_LIGHT_INTERVAL / 60000));
   } else {
     // Phase noire (restart)
     phase = "RESTART";
     phaseTimeRemaining = (CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION + CYCLE_CONFIG.BLACK_PHASE_DURATION) / 60000 - cyclePositionMinutes;
     currentLightIndex = CYCLE_CONFIG.LIGHTS_COUNT; // Tous les voyants noirs
-    lightTimeRemaining = phaseTimeRemaining;
   }
 
-  return { phase, phaseTimeRemaining, currentLightIndex, lightTimeRemaining };
+  return { phase, phaseTimeRemaining, currentLightIndex };
 }
 
 // --- Mise à jour des voyants ---
@@ -97,9 +92,9 @@ function updateLights(phase, currentLightIndex) {
 
 // --- Synchronisation ---
 function syncState() {
-  const { phase, phaseTimeRemaining, currentLightIndex, lightTimeRemaining } = getCurrentCycle();
+  const { phase, phaseTimeRemaining, currentLightIndex } = getCurrentCycle();
   state.phase = phase;
-  state.startTime = Date.now() - (TOTAL_CYCLE - (phaseTimeRemaining * 60000));
+  state.startTime = Date.now() - (cyclePositionMinutes * 60000);
   state.endTime = Date.now() + (phaseTimeRemaining * 60000);
   updateLights(phase, currentLightIndex);
 }
@@ -144,5 +139,6 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.TOKEN);
+
 
 
