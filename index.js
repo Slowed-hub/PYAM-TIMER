@@ -16,7 +16,7 @@ const CYCLE_CONFIG = {
 
 // Référence de temps basée sur l'historique
 // Online 02/10/2025 01:05:56 = début phase rouge
-const REFERENCE_TIME = new Date('2025-01-02T01:05:56').getTime();
+const REFERENCE_TIME = new Date('2025-10-02T01:05:56').getTime();
 
 // État
 let state = {
@@ -115,4 +115,4 @@ client.once("ready", async () => {
   }, 1000);
 });
 
-client.login(process.env.TOKEN);
+client.login(TOKEN);
