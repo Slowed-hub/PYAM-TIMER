@@ -1,7 +1,0 @@
-[
-  { "phase": "FERME", "start": "2025-10-03T12:06:11", "end": "2025-10-03T14:06:12" },
-  { "phase": "OUVERT", "start": "2025-10-03T14:06:12", "end": "2025-10-03T15:11:12" },
-  { "phase": "FERME", "start": "2025-10-03T15:11:12", "end": "2025-10-03T17:11:13" },
-  { "phase": "OUVERT", "start": "2025-10-03T17:11:13", "end": "2025-10-03T18:16:13" }
-  // … et ainsi de suite pour tous les cycles
-]
