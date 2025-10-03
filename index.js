@@ -6,16 +6,17 @@ const client = new Discord.Client({ intents: [Discord.IntentsBitField.Flags.Guil
 const CHANNEL_ID = '1423026396741107772';
 const CYCLES_FILE = 'cycles.json';
 
-// Configuration des durées des phases en millisecondes
+// Durées des phases en millisecondes
 const OFFLINE_DURATION = 2 * 60 * 60 * 1000; // 2 heures
 const ONLINE_DURATION = 1 * 60 * 60 * 1000; // 1 heure
 const RESTART_DURATION = 5 * 60 * 1000; // 5 minutes
+const TOTAL_CYCLE_DURATION = OFFLINE_DURATION + ONLINE_DURATION + RESTART_DURATION;
 
-// Configuration des intervalles de changement des voyants
+// Intervalles de changement des voyants
 const OFFLINE_LIGHT_INTERVAL = 24 * 60 * 1000; // 24 minutes
 const ONLINE_LIGHT_INTERVAL = 12 * 60 * 1000; // 12 minutes
 
-// Emojis pour les voyants
+// Emojis pour l'affichage
 const RED_SQUARE = '🟥';
 const GREEN_SQUARE = '🟩';
 const BLACK_SQUARE = '⬛';
@@ -46,7 +47,8 @@ function getLastCycle() {
     try {
         const data = fs.readFileSync(CYCLES_FILE, 'utf8');
         const cycles = JSON.parse(data);
-        return cycles.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+        const validCycles = cycles.filter(c => c.timestamp && !isNaN(new Date(c.timestamp)));
+        return validCycles.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0] || null;
     } catch (error) {
         console.error('Erreur lors de la lecture de cycles.json:', error);
         return null;
@@ -56,51 +58,41 @@ function getLastCycle() {
 // Fonction pour déterminer l'état actuel
 function getCurrentState(lastCycle) {
     const now = new Date();
-    const lastTimestamp = lastCycle ? new Date(lastCycle.timestamp) : new Date(0);
-    const timeDiff = now - lastTimestamp;
+    if (!lastCycle || isNaN(new Date(lastCycle.timestamp))) {
+        // Si aucun cycle valide, démarrer un nouveau cycle OFFLINE
+        return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION, startTime: now };
+    }
 
-    if (!lastCycle || lastCycle.status === 'Offline') {
-        if (timeDiff < OFFLINE_DURATION) {
-            return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION - timeDiff };
-        } else if (timeDiff < OFFLINE_DURATION + ONLINE_DURATION) {
-            return { phase: 'ONLINE', timeLeft: OFFLINE_DURATION + ONLINE_DURATION - timeDiff };
-        } else if (timeDiff < OFFLINE_DURATION + ONLINE_DURATION + RESTART_DURATION) {
-            return { phase: 'RESTART', timeLeft: OFFLINE_DURATION + ONLINE_DURATION + RESTART_DURATION - timeDiff };
-        } else {
-            return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION };
-        }
-    } else if (lastCycle.status === 'Online') {
-        if (timeDiff < ONLINE_DURATION) {
-            return { phase: 'ONLINE', timeLeft: ONLINE_DURATION - timeDiff };
-        } else if (timeDiff < ONLINE_DURATION + RESTART_DURATION) {
-            return { phase: 'RESTART', timeLeft: ONLINE_DURATION + RESTART_DURATION - timeDiff };
-        } else {
-            return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION };
-        }
+    const lastTimestamp = new Date(lastCycle.timestamp);
+    const timeDiff = now - lastTimestamp;
+    const cycleTime = timeDiff % TOTAL_CYCLE_DURATION; // Normaliser dans un cycle complet
+
+    if (cycleTime < OFFLINE_DURATION) {
+        return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION - cycleTime, startTime: new Date(now - cycleTime) };
+    } else if (cycleTime < OFFLINE_DURATION + ONLINE_DURATION) {
+        return { phase: 'ONLINE', timeLeft: OFFLINE_DURATION + ONLINE_DURATION - cycleTime, startTime: new Date(now - cycleTime) };
     } else {
-        if (timeDiff < RESTART_DURATION) {
-            return { phase: 'RESTART', timeLeft: RESTART_DURATION - timeDiff };
-        } else {
-            return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION };
-        }
+        return { phase: 'RESTART', timeLeft: TOTAL_CYCLE_DURATION - cycleTime, startTime: new Date(now - cycleTime) };
     }
 }
 
 // Fonction pour générer l'affichage des voyants
-function getLightDisplay(phase, timeLeft) {
+function getLightDisplay(phase, timeLeft, phaseStartTime) {
     let lights = [];
     let statusText = '';
     let circle = '';
     let timerText = '';
 
     if (phase === 'OFFLINE') {
-        const lightsOn = Math.floor((OFFLINE_DURATION - timeLeft) / OFFLINE_LIGHT_INTERVAL);
+        const elapsed = Date.now() - phaseStartTime;
+        const lightsOn = Math.min(5, Math.floor(elapsed / OFFLINE_LIGHT_INTERVAL));
         lights = Array(5).fill(RED_SQUARE).map((light, i) => (i < lightsOn ? GREEN_SQUARE : RED_SQUARE));
         statusText = 'HANGAR CLOSED';
         circle = RED_CIRCLE;
         timerText = `Opening in: ${formatTimeRemaining(timeLeft)}`;
     } else if (phase === 'ONLINE') {
-        const lightsOff = Math.floor((ONLINE_DURATION - timeLeft) / ONLINE_LIGHT_INTERVAL);
+        const elapsed = Date.now() - phaseStartTime;
+        const lightsOff = Math.min(5, Math.floor(elapsed / ONLINE_LIGHT_INTERVAL));
         lights = Array(5).fill(GREEN_SQUARE).map((light, i) => (i >= 5 - lightsOff ? BLACK_SQUARE : GREEN_SQUARE));
         statusText = 'HANGAR OPEN';
         circle = GREEN_CIRCLE;
@@ -118,7 +110,7 @@ function getLightDisplay(phase, timeLeft) {
 // Fonction pour écrire un nouveau cycle dans cycles.json
 function writeCycle(status) {
     const newCycle = {
-        id: Math.floor(Math.random() * 1000), // ID aléatoire pour l'exemple
+        id: Math.floor(Math.random() * 1000),
         status,
         timestamp: new Date().toISOString()
     };
@@ -142,31 +134,31 @@ client.once('ready', () => {
     }
 
     let lastPhase = null;
+    let lastMessage = null;
 
     // Mise à jour toutes les 10 secondes
     setInterval(async () => {
         const lastCycle = getLastCycle();
-        const { phase, timeLeft } = getCurrentState(lastCycle);
+        const { phase, timeLeft, startTime } = getCurrentState(lastCycle);
 
-        // Si la phase change, écrire un nouveau cycle
-        if (phase !== lastPhase) {
-            if (phase === 'OFFLINE' && lastPhase !== null) writeCycle('Offline');
+        // Écrire un nouveau cycle lors d'une transition de phase
+        if (phase !== lastPhase && lastPhase !== null) {
+            if (phase === 'OFFLINE') writeCycle('Offline');
             else if (phase === 'ONLINE') writeCycle('Online');
-            lastPhase = phase;
+            // Pas de cycle écrit pour RESTART, car c'est une phase transitoire
         }
+        lastPhase = phase;
 
-        // Envoyer ou mettre à jour le message
-        const messageContent = getLightDisplay(phase, timeLeft);
+        // Générer et envoyer/mettre à jour le message
+        const messageContent = getLightDisplay(phase, timeLeft, startTime);
         try {
-            const messages = await channel.messages.fetch({ limit: 1 });
-            const lastMessage = messages.first();
             if (lastMessage && lastMessage.author.id === client.user.id) {
                 await lastMessage.edit(messageContent);
             } else {
-                await channel.send(messageContent);
+                lastMessage = await channel.send(messageContent);
             }
         } catch (error) {
-            console.error('Erreur lors de l\'envoi du message:', error);
+            console.error('Erreur lors de l\'envoi/mise à jour du message:', error);
         }
     }, 10000); // Mise à jour toutes les 10 secondes
 });
