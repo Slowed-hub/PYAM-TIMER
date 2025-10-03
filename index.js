@@ -1,5 +1,6 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const fs = require("fs");
 const express = require("express");
 
 // --- Serveur HTTP pour Render ---
@@ -12,37 +13,15 @@ app.listen(PORT, () => console.log(`🌐 Serveur HTTP actif sur le port ${PORT}`
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// --- Paramètres du cycle ---
+// --- Charger le planning exact ---
+const rawCycles = fs.readFileSync("./cycles.json");
+const cycles = JSON.parse(rawCycles).map(c => ({
+  phase: c.phase,
+  startTime: new Date(c.start).getTime(),
+  endTime: new Date(c.end).getTime()
+}));
+
 const LIGHTS_COUNT = 5;
-const START_TIME = new Date("2025-10-03T11:01:11").getTime(); // point de départ
-const ONLINE_DURATION  = 65 * 60 * 1000; // 65 minutes Online
-const OFFLINE_DURATION = 65 * 60 * 1000; // 65 minutes Offline
-
-const ONLINE_LIGHT_INTERVAL  = ONLINE_DURATION / LIGHTS_COUNT;
-const OFFLINE_LIGHT_INTERVAL = OFFLINE_DURATION / LIGHTS_COUNT;
-
-// --- Génération dynamique des cycles sur 5 ans ---
-function generateFutureCycles(startTime, onlineDuration, offlineDuration, years = 5) {
-  const cycles = [];
-  const now = Date.now();
-  const endTime = now + years * 365.25 * 24 * 60 * 60 * 1000; // 5 ans en ms
-  let t = startTime;
-
-  while (t < endTime) {
-    const onlineStart = t;
-    const onlineEnd = t + onlineDuration;
-    const offlineStart = onlineEnd;
-    const offlineEnd = offlineStart + offlineDuration;
-
-    cycles.push({ phase: "OUVERT", startTime: onlineStart, endTime: onlineEnd });
-    cycles.push({ phase: "FERME", startTime: offlineStart, endTime: offlineEnd });
-
-    t += onlineDuration + offlineDuration;
-  }
-  return cycles;
-}
-
-const cycles = generateFutureCycles(START_TIME, ONLINE_DURATION, OFFLINE_DURATION, 5);
 
 // --- État ---
 let state = {
@@ -52,47 +31,30 @@ let state = {
   lights: Array(LIGHTS_COUNT).fill("⬛")
 };
 
-// --- Détection du cycle actuel ---
+// --- Détection du cycle courant ---
 function getCurrentCycle() {
   const now = Date.now();
   for (const c of cycles) {
-    if (now >= c.startTime && now < c.endTime) {
-      return c;
-    }
+    if (now >= c.startTime && now < c.endTime) return c;
   }
-  // Si on est après le dernier cycle, retourne le dernier cycle
-  return cycles[cycles.length - 1];
+  return cycles[cycles.length - 1]; // si on est après le dernier cycle
 }
 
-// --- Mise à jour fluide des voyants ---
+// --- Mise à jour des voyants ---
 function updateLights() {
   const now = Date.now();
-  const { phase, startTime } = state;
-  let currentIndex = 0;
-  let progress = 0;
+  const { phase, startTime, endTime } = state;
+  const duration = endTime - startTime;
+  const interval = duration / LIGHTS_COUNT;
+  let currentIndex = Math.floor((now - startTime) / interval);
+  if (currentIndex >= LIGHTS_COUNT) currentIndex = LIGHTS_COUNT - 1;
+  const progress = ((now - startTime) % interval) / interval;
 
-  if (phase === "FERME") {
-    currentIndex = Math.floor((now - startTime) / OFFLINE_LIGHT_INTERVAL);
-    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-    progress = ((now - startTime) % OFFLINE_LIGHT_INTERVAL) / OFFLINE_LIGHT_INTERVAL;
-
-    for (let i = 0; i < LIGHTS_COUNT; i++) {
-      const idx = LIGHTS_COUNT - 1 - i;
-      if (i < currentIndex) state.lights[idx] = "🟥";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟥" : "⬛";
-      else state.lights[idx] = "⬛";
-    }
-  } else if (phase === "OUVERT") {
-    currentIndex = Math.floor((now - startTime) / ONLINE_LIGHT_INTERVAL);
-    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-    progress = ((now - startTime) % ONLINE_LIGHT_INTERVAL) / ONLINE_LIGHT_INTERVAL;
-
-    for (let i = 0; i < LIGHTS_COUNT; i++) {
-      const idx = LIGHTS_COUNT - 1 - i;
-      if (i < currentIndex) state.lights[idx] = "🟩";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟩" : "⬛";
-      else state.lights[idx] = "⬛";
-    }
+  for (let i = 0; i < LIGHTS_COUNT; i++) {
+    const idx = LIGHTS_COUNT - 1 - i;
+    if (i < currentIndex) state.lights[idx] = phase === "OUVERT" ? "🟩" : "🟥";
+    else if (i === currentIndex) state.lights[idx] = progress > 0.5 ? (phase === "OUVERT" ? "🟩" : "🟥") : "⬛";
+    else state.lights[idx] = "⬛";
   }
 }
 
@@ -110,7 +72,6 @@ function buildEmbed() {
   const remainingMs = state.endTime - Date.now();
   const min = Math.floor(remainingMs / 60000);
   const sec = Math.floor((remainingMs % 60000) / 1000);
-
   const countdown = `${min} min ${sec}s`;
 
   return new EmbedBuilder()
@@ -140,6 +101,7 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
