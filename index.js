@@ -32,6 +32,10 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // Fonction pour formater le temps restant
 function formatTimeRemaining(ms) {
+    if (ms < 0 || ms > TOTAL_CYCLE_DURATION) {
+        console.error(`Temps restant invalide: ${ms}ms`);
+        return '0m 00s';
+    }
     const totalSeconds = Math.floor(ms / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -45,10 +49,17 @@ function formatTimeRemaining(ms) {
 // Fonction pour lire le dernier cycle
 function getLastCycle() {
     try {
+        if (!fs.existsSync(CYCLES_FILE)) {
+            console.log('cycles.json n\'existe pas, création d\'un fichier vide');
+            fs.writeFileSync(CYCLES_FILE, '[]');
+            return null;
+        }
         const data = fs.readFileSync(CYCLES_FILE, 'utf8');
         const cycles = JSON.parse(data);
         const validCycles = cycles.filter(c => c.timestamp && !isNaN(new Date(c.timestamp)));
-        return validCycles.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0] || null;
+        const lastCycle = validCycles.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0] || null;
+        console.log('Dernier cycle lu:', lastCycle);
+        return lastCycle;
     } catch (error) {
         console.error('Erreur lors de la lecture de cycles.json:', error);
         return null;
@@ -59,14 +70,21 @@ function getLastCycle() {
 function getCurrentState(lastCycle) {
     const now = new Date();
     if (!lastCycle || isNaN(new Date(lastCycle.timestamp))) {
-        // Si aucun cycle valide, démarrer un nouveau cycle OFFLINE
+        console.log('Aucun cycle valide, démarrage d\'un nouveau cycle OFFLINE');
         return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION, startTime: now };
     }
 
     const lastTimestamp = new Date(lastCycle.timestamp);
     const timeDiff = now - lastTimestamp;
-    const cycleTime = timeDiff % TOTAL_CYCLE_DURATION; // Normaliser dans un cycle complet
+    console.log(`TimeDiff: ${timeDiff}ms, Dernier timestamp: ${lastCycle.timestamp}`);
 
+    // Si timeDiff est aberrant, réinitialiser
+    if (timeDiff < 0 || timeDiff > TOTAL_CYCLE_DURATION * 10) {
+        console.log('TimeDiff aberrant, réinitialisation du cycle');
+        return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION, startTime: now };
+    }
+
+    const cycleTime = timeDiff % TOTAL_CYCLE_DURATION;
     if (cycleTime < OFFLINE_DURATION) {
         return { phase: 'OFFLINE', timeLeft: OFFLINE_DURATION - cycleTime, startTime: new Date(now - cycleTime) };
     } else if (cycleTime < OFFLINE_DURATION + ONLINE_DURATION) {
@@ -116,12 +134,19 @@ function writeCycle(status) {
     };
     let cycles = [];
     try {
-        cycles = JSON.parse(fs.readFileSync(CYCLES_FILE, 'utf8'));
+        if (fs.existsSync(CYCLES_FILE)) {
+            cycles = JSON.parse(fs.readFileSync(CYCLES_FILE, 'utf8'));
+        }
     } catch (error) {
-        console.error('Erreur lors de la lecture de cycles.json:', error);
+        console.error('Erreur lors de la lecture de cycles.json pour écriture:', error);
     }
     cycles.push(newCycle);
-    fs.writeFileSync(CYCLES_FILE, JSON.stringify(cycles, null, 2));
+    try {
+        fs.writeFileSync(CYCLES_FILE, JSON.stringify(cycles, null, 2));
+        console.log(`Nouveau cycle écrit: ${status}, Timestamp: ${newCycle.timestamp}`);
+    } catch (error) {
+        console.error('Erreur lors de l\'écriture de cycles.json:', error);
+    }
 }
 
 // Événement déclenché quand le bot est prêt
@@ -145,7 +170,6 @@ client.once('ready', () => {
         if (phase !== lastPhase && lastPhase !== null) {
             if (phase === 'OFFLINE') writeCycle('Offline');
             else if (phase === 'ONLINE') writeCycle('Online');
-            // Pas de cycle écrit pour RESTART, car c'est une phase transitoire
         }
         lastPhase = phase;
 
@@ -157,6 +181,7 @@ client.once('ready', () => {
             } else {
                 lastMessage = await channel.send(messageContent);
             }
+            console.log(`Message mis à jour: ${messageContent}`);
         } catch (error) {
             console.error('Erreur lors de l\'envoi/mise à jour du message:', error);
         }
