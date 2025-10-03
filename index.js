@@ -58,4 +58,30 @@ function getCurrentPhase(currentTime) {
         return {
             phase: 'RESTART',
             nextChangeTime: new Date(currentTime.getTime() + (OPEN_DURATION + CLOSE_DURATION + RESTART_DURATION - timeInCycle)),
-            time
+            timeInPhase: timeInCycle - (OPEN_DURATION + CLOSE_DURATION)
+        };
+    }
+}
+
+// Format time for countdown
+function formatTime(ms) {
+    if (ms >= 3600000) { // Hours and minutes for OFFLINE
+        const hours = Math.floor(ms / 3600000);
+        const minutes = Math.floor((ms % 3600000) / 60000);
+        return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+    } else { // Minutes and seconds for ONLINE and RESTART
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000);
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+}
+
+// Get indicator states based on phase and time
+function getIndicators(phase, timeInPhase) {
+    if (phase === 'RESTART') {
+        return INDICATOR_STATES.RESTART[0];
+    } else if (phase === 'OFFLINE') {
+        const index = Math.min(Math.floor(timeInPhase / OFFLINE_INDICATOR_INTERVAL), 4);
+        return INDICATOR_STATES.OFFLINE[index];
+    } else { // ONLINE
+        const index = Math.min(Math.floor(timeInPhase / ONLINE
