@@ -42,7 +42,7 @@ function getCurrentPhaseAndNextChange(currentTime) {
         status = 'RESTART';
         label = 'RESTART';
         dot = '🟡';
-        countdownLabel = 'Hors ligne dans :';
+        countdownLabel = 'Hors ligne pendant :';
         nextChangeTime = INITIAL_OPEN_TIME + Math.floor(elapsedTimeSinceInitialOpen / CYCLE_DURATION) * CYCLE_DURATION + OPEN_DURATION;
     } else {
         status = 'OFFLINE';
@@ -155,3 +155,4 @@ server.listen(process.env.PORT || 3000, () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
