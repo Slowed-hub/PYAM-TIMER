@@ -93,7 +93,7 @@ client.on('ready', async () => {
         return;
     }
     statusMessage = await channel.send('Initializing...');
-    updateInterval = setInterval(updateStatusMessage, 10000);
+    updateInterval = setInterval(updateStatusMessage, 1000);
 });
 
 async function updateStatusMessage() {
@@ -130,4 +130,5 @@ server.listen(process.env.PORT || 3000, () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
