@@ -218,4 +218,6 @@ client.login(DISCORD_TOKEN).catch((error) => {
   process.exit(1);
 });
 
+client.login(process.env.TOKEN);
+
 
