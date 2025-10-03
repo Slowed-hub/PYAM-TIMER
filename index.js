@@ -122,7 +122,8 @@ function getLightDisplay(phase, timeLeft, phaseStartTime) {
         timerText = `Restart in: ${formatTimeRemaining(timeLeft)}`;
     }
 
-    return `${lights.join(' ')}\n${circle} ${statusText}\n${timerText}`;
+    // Ajout d'une ligne vide entre chaque élément
+    return `${lights.join(' ')}\n\n${circle} ${statusText}\n\n${timerText}`;
 }
 
 // Fonction pour écrire un nouveau cycle dans cycles.json
