@@ -12,15 +12,15 @@ app.listen(PORT, () => console.log(`🌐 Serveur HTTP actif sur le port ${PORT}`
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// --- Durées du cycle ---
+// --- Paramètres du cycle ---
 const LIGHTS_COUNT = 5;
-const RED_PHASE_DURATION = 120 * 60 * 1000;   // 120 min
-const GREEN_PHASE_DURATION = 60 * 60 * 1000;  // 60 min
-const BLACK_PHASE_DURATION = 5 * 60 * 1000;   // 5 min
-const TOTAL_CYCLE = RED_PHASE_DURATION + GREEN_PHASE_DURATION + BLACK_PHASE_DURATION;
+const START_TIME = new Date("2025-10-03T11:01:11").getTime(); // point de départ
+const ONLINE_DURATION  = 65 * 60 * 1000; // 65 minutes Online
+const OFFLINE_DURATION = 65 * 60 * 1000; // 65 minutes Offline
+const TOTAL_CYCLE = ONLINE_DURATION + OFFLINE_DURATION;
 
-const RED_LIGHT_INTERVAL = RED_PHASE_DURATION / LIGHTS_COUNT;
-const GREEN_LIGHT_INTERVAL = GREEN_PHASE_DURATION / LIGHTS_COUNT;
+const ONLINE_LIGHT_INTERVAL  = ONLINE_DURATION / LIGHTS_COUNT;
+const OFFLINE_LIGHT_INTERVAL = OFFLINE_DURATION / LIGHTS_COUNT;
 
 // --- État ---
 let state = {
@@ -30,30 +30,26 @@ let state = {
   lights: Array(LIGHTS_COUNT).fill("🟥")
 };
 
-// --- Calcul du cycle basé sur l'heure actuelle ---
-function getCurrentCycle() {
+// --- Calcul du cycle autonome ---
+function getCurrentCycleAutonomous() {
   const now = Date.now();
-  const elapsedInCycle = now % TOTAL_CYCLE;
+  const elapsed = now - START_TIME;
+  const cycleIndex = Math.floor(elapsed / TOTAL_CYCLE);
+  const cycleStart = START_TIME + cycleIndex * TOTAL_CYCLE;
 
-  if (elapsedInCycle < RED_PHASE_DURATION) {
-    return {
-      phase: "FERME",
-      startTime: now - elapsedInCycle,
-      endTime: now - elapsedInCycle + RED_PHASE_DURATION
-    };
-  }
-  if (elapsedInCycle < RED_PHASE_DURATION + GREEN_PHASE_DURATION) {
+  if (now < cycleStart + ONLINE_DURATION) {
     return {
       phase: "OUVERT",
-      startTime: now - (elapsedInCycle - RED_PHASE_DURATION),
-      endTime: now - (elapsedInCycle - RED_PHASE_DURATION) + GREEN_PHASE_DURATION
+      startTime: cycleStart,
+      endTime: cycleStart + ONLINE_DURATION
+    };
+  } else {
+    return {
+      phase: "FERME",
+      startTime: cycleStart + ONLINE_DURATION,
+      endTime: cycleStart + TOTAL_CYCLE
     };
   }
-  return {
-    phase: "RESTART",
-    startTime: now - (elapsedInCycle - RED_PHASE_DURATION - GREEN_PHASE_DURATION),
-    endTime: now - (elapsedInCycle - RED_PHASE_DURATION - GREEN_PHASE_DURATION) + BLACK_PHASE_DURATION
-  };
 }
 
 // --- Mise à jour fluide des voyants ---
@@ -64,35 +60,33 @@ function updateLights() {
   let progress = 0;
 
   if (phase === "FERME") {
-    currentIndex = Math.floor((now - startTime) / RED_LIGHT_INTERVAL);
+    currentIndex = Math.floor((now - startTime) / OFFLINE_LIGHT_INTERVAL);
     if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-    progress = ((now - startTime) % RED_LIGHT_INTERVAL) / RED_LIGHT_INTERVAL;
+    progress = ((now - startTime) % OFFLINE_LIGHT_INTERVAL) / OFFLINE_LIGHT_INTERVAL;
+
+    for (let i = 0; i < LIGHTS_COUNT; i++) {
+      const idx = LIGHTS_COUNT - 1 - i;
+      if (i < currentIndex) state.lights[idx] = "🟥";
+      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟥" : "⬛";
+      else state.lights[idx] = "⬛";
+    }
+  } else if (phase === "OUVERT") {
+    currentIndex = Math.floor((now - startTime) / ONLINE_LIGHT_INTERVAL);
+    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
+    progress = ((now - startTime) % ONLINE_LIGHT_INTERVAL) / ONLINE_LIGHT_INTERVAL;
 
     for (let i = 0; i < LIGHTS_COUNT; i++) {
       const idx = LIGHTS_COUNT - 1 - i;
       if (i < currentIndex) state.lights[idx] = "🟩";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟩" : "🟥";
-      else state.lights[idx] = "🟥";
+      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟩" : "⬛";
+      else state.lights[idx] = "⬛";
     }
-  } else if (phase === "OUVERT") {
-    currentIndex = Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL);
-    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-    progress = ((now - startTime) % GREEN_LIGHT_INTERVAL) / GREEN_LIGHT_INTERVAL;
-
-    for (let i = 0; i < LIGHTS_COUNT; i++) {
-      const idx = LIGHTS_COUNT - 1 - i;
-      if (i < currentIndex) state.lights[idx] = "⬛";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "⬛" : "🟩";
-      else state.lights[idx] = "🟩";
-    }
-  } else {
-    state.lights = Array(LIGHTS_COUNT).fill("⬛");
   }
 }
 
 // --- Synchronisation ---
 function syncState() {
-  const cycle = getCurrentCycle();
+  const cycle = getCurrentCycleAutonomous();
   state.phase = cycle.phase;
   state.startTime = cycle.startTime;
   state.endTime = cycle.endTime;
@@ -105,14 +99,14 @@ function buildEmbed() {
   const min = Math.floor(remainingMs / 60000);
   const sec = Math.floor((remainingMs % 60000) / 1000);
 
-  const countdown = state.phase === "FERME" ? `${min} min` : `${min} min ${sec}s`;
+  const countdown = `${min} min ${sec}s`;
 
   return new EmbedBuilder()
     .setTitle("Executive Hangar Status :")
-    .setColor(state.phase === "FERME" ? "Red" : state.phase === "OUVERT" ? "Green" : "Yellow")
+    .setColor(state.phase === "FERME" ? "Red" : "Green")
     .addFields(
       { name: "Voyants :", value: state.lights.join(" "), inline: false },
-      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : state.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown }
+      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : "HANGAR OUVERT 🟢", value: countdown }
     );
 }
 
@@ -134,6 +128,7 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
