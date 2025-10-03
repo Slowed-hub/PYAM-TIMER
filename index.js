@@ -1,59 +1,61 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const fs = require('fs');
-const http = require('http');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
-const CHANNEL_ID = '1423026396741107772';
-
-let cyclePhase = 'Offline';
-let lights = [false, false, false, false, false];
-let cycleData = JSON.parse(fs.readFileSync('cycles.json', 'utf8'));
-
-function updateLights() {
-    const now = new Date();
-    let nextEvent = cycleData.find(entry => new Date(entry.timestamp) > now);
-    if (!nextEvent) nextEvent = cycleData[0]; // Loop back if at end
-
-    if (cyclePhase === 'Offline') {
-        const timeDiff = (new Date(nextEvent.timestamp) - now) / 1000 / 60;
-        if (timeDiff <= 120) { // 2 hours
-            const interval = 24;
-            lights.forEach((light, index) => {
-                if (timeDiff <= 120 - (index * interval) && !light) lights[index] = true;
-            });
-            client.channels.cache.get(CHANNEL_ID).send(`🟥🟥🟥🟥🟥\n🟥 HANGAR CLOSED\nOpening in: ${Math.floor(timeDiff / 60)}h ${Math.floor(timeDiff % 60)}m`);
-        }
-        if (timeDiff > 120) cyclePhase = 'Online'; // Transition to next phase
-    } else if (cyclePhase === 'Online') {
-        const timeDiff = (new Date(nextEvent.timestamp) - now) / 1000;
-        if (timeDiff <= 3600) { // 1 hour
-            const interval = 12 * 60;
-            lights.forEach((light, index) => {
-                if (timeDiff <= 3600 - ((4 - index) * interval) && light) lights[4 - index] = false;
-            });
-            client.channels.cache.get(CHANNEL_ID).send(`🟩🟩🟩🟩🟩\n🟩 HANGAR OPEN\nClose in: ${Math.floor(timeDiff / 60)}m ${Math.floor(timeDiff % 60)}s`);
-        }
-        if (timeDiff > 3600) cyclePhase = 'Restart'; // Transition to next phase
-    } else if (cyclePhase === 'Restart') {
-        const timeDiff = (new Date(nextEvent.timestamp) - now) / 1000;
-        if (timeDiff <= 300) { // 5 minutes
-            lights = [false, false, false, false, false];
-            client.channels.cache.get(CHANNEL_ID).send(`⬜⬜⬜⬜⬜\n🟨 RESTART\nRestart in: ${Math.floor(timeDiff / 60)}m ${Math.floor(timeDiff % 60)}s`);
-        }
-        if (timeDiff > 300) cyclePhase = 'Offline'; // Back to start
-    }
-}
-
-client.once('ready', () => {
-    console.log('Bot is online!');
-    setInterval(updateLights, 60000); // Update every minute
-    updateLights(); // Initial update
+// Discord client setup
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-client.login(process.env.DISCORD_TOKEN);
+const CHANNEL_ID = '1423026396741107772';
 
-// HTTP server for Render
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is running');
-}).listen(process.env.PORT || 3000);
+// Timing constants (in milliseconds)
+const OPEN_DURATION = 3600000; // 1 hour
+const CLOSE_DURATION = 7200000; // 2 hours
+const RESTART_DURATION = 300000; // 5 minutes
+const CYCLE_DURATION = OPEN_DURATION + CLOSE_DURATION + RESTART_DURATION;
+const INITIAL_OPEN_TIME = new Date('2025-09-21T00:04:27.222-04:00');
+
+// Indicator transition timings
+const OFFLINE_INDICATOR_INTERVAL = 24 * 60 * 1000; // 24 minutes
+const ONLINE_INDICATOR_INTERVAL = 12 * 60 * 1000; // 12 minutes
+
+// Indicator states for each phase
+const INDICATOR_STATES = {
+    OFFLINE: [
+        ['red', 'red', 'red', 'red', 'red'], // 0-24 min
+        ['green', 'red', 'red', 'red', 'red'], // 24-48 min
+        ['green', 'green', 'red', 'red', 'red'], // 48-72 min
+        ['green', 'green', 'green', 'red', 'red'], // 72-96 min
+        ['green', 'green', 'green', 'green', 'red'] // 96-120 min
+    ],
+    ONLINE: [
+        ['green', 'green', 'green', 'green', 'green'], // 0-12 min
+        ['green', 'green', 'green', 'green', 'empty'], // 12-24 min
+        ['green', 'green', 'green', 'empty', 'empty'], // 24-36 min
+        ['green', 'green', 'empty', 'empty', 'empty'], // 36-48 min
+        ['green', 'empty', 'empty', 'empty', 'empty'] // 48-60 min
+    ],
+    RESTART: [['empty', 'empty', 'empty', 'empty', 'empty']] // All black
+};
+
+// Function to get current phase and next change time
+function getCurrentPhase(currentTime) {
+    const elapsedTime = currentTime - INITIAL_OPEN_TIME;
+    const timeInCycle = elapsedTime % CYCLE_DURATION;
+
+    if (timeInCycle < OPEN_DURATION) {
+        return {
+            phase: 'ONLINE',
+            nextChangeTime: new Date(currentTime.getTime() + (OPEN_DURATION - timeInCycle)),
+            timeInPhase: timeInCycle
+        };
+    } else if (timeInCycle < OPEN_DURATION + CLOSE_DURATION) {
+        return {
+            phase: 'OFFLINE',
+            nextChangeTime: new Date(currentTime.getTime() + (OPEN_DURATION + CLOSE_DURATION - timeInCycle)),
+            timeInPhase: timeInCycle - OPEN_DURATION
+        };
+    } else {
+        return {
+            phase: 'RESTART',
+            nextChangeTime: new Date(currentTime.getTime() + (OPEN_DURATION + CLOSE_DURATION + RESTART_DURATION - timeInCycle)),
+            time
