@@ -1,14 +1,19 @@
 {
-  "name": "404 PYAM TIMER",
+  "name": "discord-timer-bot",
   "version": "1.0.0",
+  "description": "Bot Discord avec timer synchronisé pour le hangar PYAM",
   "main": "index.js",
-  "type": "commonjs",
+  "private": true,
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "build": "echo 'Build complete - No build step required for Node.js'",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.4.5"
+    "discord.js": "^14.22.1",
+    "dotenv": "^17.2.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
-
