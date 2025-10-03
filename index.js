@@ -14,17 +14,35 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 
 // --- Paramètres du cycle ---
 const LIGHTS_COUNT = 5;
-
-// Premier créneau connu
-const START_TIME = new Date("2025-10-03T11:01:11").getTime(); 
-
-// Durées exactes en millisecondes
-const ONLINE_DURATION  = 65 * 60 * 1000; // 65 min Online
-const OFFLINE_DURATION = 65 * 60 * 1000; // 65 min Offline
-const TOTAL_CYCLE = ONLINE_DURATION + OFFLINE_DURATION;
+const START_TIME = new Date("2025-10-03T11:01:11").getTime(); // point de départ
+const ONLINE_DURATION  = 65 * 60 * 1000; // 65 minutes Online
+const OFFLINE_DURATION = 65 * 60 * 1000; // 65 minutes Offline
 
 const ONLINE_LIGHT_INTERVAL  = ONLINE_DURATION / LIGHTS_COUNT;
 const OFFLINE_LIGHT_INTERVAL = OFFLINE_DURATION / LIGHTS_COUNT;
+
+// --- Génération dynamique des cycles sur 5 ans ---
+function generateFutureCycles(startTime, onlineDuration, offlineDuration, years = 5) {
+  const cycles = [];
+  const now = Date.now();
+  const endTime = now + years * 365.25 * 24 * 60 * 60 * 1000; // 5 ans en ms
+  let t = startTime;
+
+  while (t < endTime) {
+    const onlineStart = t;
+    const onlineEnd = t + onlineDuration;
+    const offlineStart = onlineEnd;
+    const offlineEnd = offlineStart + offlineDuration;
+
+    cycles.push({ phase: "OUVERT", startTime: onlineStart, endTime: onlineEnd });
+    cycles.push({ phase: "FERME", startTime: offlineStart, endTime: offlineEnd });
+
+    t += onlineDuration + offlineDuration;
+  }
+  return cycles;
+}
+
+const cycles = generateFutureCycles(START_TIME, ONLINE_DURATION, OFFLINE_DURATION, 5);
 
 // --- État ---
 let state = {
@@ -34,27 +52,16 @@ let state = {
   lights: Array(LIGHTS_COUNT).fill("⬛")
 };
 
-// --- Calcul automatique du cycle en cours ---
-function getCurrentCycleRobust() {
+// --- Détection du cycle actuel ---
+function getCurrentCycle() {
   const now = Date.now();
-  const elapsed = now - START_TIME;
-  const cycleIndex = Math.floor(elapsed / TOTAL_CYCLE);
-  const cycleStart = START_TIME + cycleIndex * TOTAL_CYCLE;
-
-  // Détermination du cycle courant
-  if (now < cycleStart + ONLINE_DURATION) {
-    return {
-      phase: "OUVERT",
-      startTime: cycleStart,
-      endTime: cycleStart + ONLINE_DURATION
-    };
-  } else {
-    return {
-      phase: "FERME",
-      startTime: cycleStart + ONLINE_DURATION,
-      endTime: cycleStart + TOTAL_CYCLE
-    };
+  for (const c of cycles) {
+    if (now >= c.startTime && now < c.endTime) {
+      return c;
+    }
   }
+  // Si on est après le dernier cycle, retourne le dernier cycle
+  return cycles[cycles.length - 1];
 }
 
 // --- Mise à jour fluide des voyants ---
@@ -89,9 +96,9 @@ function updateLights() {
   }
 }
 
-// --- Synchronisation robuste ---
+// --- Synchronisation ---
 function syncState() {
-  const cycle = getCurrentCycleRobust();
+  const cycle = getCurrentCycle();
   state.phase = cycle.phase;
   state.startTime = cycle.startTime;
   state.endTime = cycle.endTime;
@@ -126,7 +133,6 @@ client.once("ready", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID);
   messageInstance = await channel.send({ embeds: [buildEmbed()] });
 
-  // Mise à jour toutes les secondes
   setInterval(() => {
     syncState();
     if (messageInstance) messageInstance.edit({ embeds: [buildEmbed()] });
@@ -134,6 +140,7 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
