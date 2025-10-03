@@ -59,9 +59,9 @@ function formatTimeRemaining(ms) {
   const remainingMinutes = minutes % 60;
 
   if (currentStatus === 'OFFLINE') {
-    return `${hours}h ${remainingMinutes}m`;
+    return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`; // Ajout des secondes pour OFFLINE
   } else {
-    return `${remainingMinutes}m ${remainingSeconds}s`;
+    return `${remainingMinutes}m ${remainingSeconds}s`; // Minutes et secondes pour ONLINE et RESTART
   }
 }
 
@@ -81,9 +81,9 @@ function updateLights(phaseProgress) {
 // Générer le message Discord
 function generateMessage(remainingTime) {
   const statusText = {
-    OFFLINE: 'HANGAR CLOSED 🟥',
-    ONLINE: 'HANGAR OPEN 🟩',
-    RESTART: 'RESTART 🟡'
+    OFFLINE: 'HANGAR CLOSED',
+    ONLINE: 'HANGAR OPEN',
+    RESTART: 'RESTART'
   };
   const timerText = {
     OFFLINE: `Opening in: ${formatTimeRemaining(remainingTime)}`,
@@ -91,7 +91,7 @@ function generateMessage(remainingTime) {
     RESTART: `Restart in: ${formatTimeRemaining(remainingTime)}`
   };
 
-  return `**EXECUTIVE HANGAR STATUS :**\n\n${lights.join(' ')}\n${statusText[currentStatus]}\n${timerText[currentStatus]}`;
+  return `${lights.join(' ')}\n${statusText[currentStatus]}\n${timerText[currentStatus]}`;
 }
 
 // Mettre à jour le minuteur
@@ -170,7 +170,8 @@ app.listen(port, () => {
 });
 
 // Connexion du bot Discord
-client.login(process.env.DISCORD_TOKEN);
+lient.login(process.env.DISCORD_TOKEN);
+
 
 
 
