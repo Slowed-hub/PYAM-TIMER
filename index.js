@@ -14,9 +14,13 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 
 // --- Paramètres du cycle ---
 const LIGHTS_COUNT = 5;
-const START_TIME = new Date("2025-10-03T11:01:11").getTime(); // point de départ
-const ONLINE_DURATION  = 65 * 60 * 1000; // 65 minutes Online
-const OFFLINE_DURATION = 65 * 60 * 1000; // 65 minutes Offline
+
+// Premier créneau connu
+const START_TIME = new Date("2025-10-03T11:01:11").getTime(); 
+
+// Durées exactes en millisecondes
+const ONLINE_DURATION  = 65 * 60 * 1000; // 65 min Online
+const OFFLINE_DURATION = 65 * 60 * 1000; // 65 min Offline
 const TOTAL_CYCLE = ONLINE_DURATION + OFFLINE_DURATION;
 
 const ONLINE_LIGHT_INTERVAL  = ONLINE_DURATION / LIGHTS_COUNT;
@@ -27,16 +31,17 @@ let state = {
   phase: "FERME",
   startTime: Date.now(),
   endTime: Date.now(),
-  lights: Array(LIGHTS_COUNT).fill("🟥")
+  lights: Array(LIGHTS_COUNT).fill("⬛")
 };
 
-// --- Calcul du cycle autonome ---
-function getCurrentCycleAutonomous() {
+// --- Calcul automatique du cycle en cours ---
+function getCurrentCycleRobust() {
   const now = Date.now();
   const elapsed = now - START_TIME;
   const cycleIndex = Math.floor(elapsed / TOTAL_CYCLE);
   const cycleStart = START_TIME + cycleIndex * TOTAL_CYCLE;
 
+  // Détermination du cycle courant
   if (now < cycleStart + ONLINE_DURATION) {
     return {
       phase: "OUVERT",
@@ -84,9 +89,9 @@ function updateLights() {
   }
 }
 
-// --- Synchronisation ---
+// --- Synchronisation robuste ---
 function syncState() {
-  const cycle = getCurrentCycleAutonomous();
+  const cycle = getCurrentCycleRobust();
   state.phase = cycle.phase;
   state.startTime = cycle.startTime;
   state.endTime = cycle.endTime;
@@ -121,6 +126,7 @@ client.once("ready", async () => {
   const channel = await client.channels.fetch(CHANNEL_ID);
   messageInstance = await channel.send({ embeds: [buildEmbed()] });
 
+  // Mise à jour toutes les secondes
   setInterval(() => {
     syncState();
     if (messageInstance) messageInstance.edit({ embeds: [buildEmbed()] });
@@ -128,6 +134,7 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
