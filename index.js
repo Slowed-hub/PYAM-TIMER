@@ -1,132 +1,188 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 
+// --- Configuration ---
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// --- Durées du cycle ---
-const LIGHTS_COUNT = 5;
-const RED_PHASE_DURATION = 120 * 60 * 1000;   // 120 min
-const GREEN_PHASE_DURATION = 60 * 60 * 1000;  // 60 min
-const BLACK_PHASE_DURATION = 5 * 60 * 1000;   // 5 min
-const TOTAL_CYCLE = RED_PHASE_DURATION + GREEN_PHASE_DURATION + BLACK_PHASE_DURATION;
+// Configuration du cycle (identique au site)
+const CYCLE_CONFIG = {
+  RED_PHASE_DURATION: 120, // minutes
+  GREEN_PHASE_DURATION: 60, // minutes
+  BLACK_PHASE_DURATION: 5, // minutes
+  LIGHTS_COUNT: 5,
+  RED_LIGHT_INTERVAL: 24, // minutes par voyant en phase rouge
+  GREEN_LIGHT_INTERVAL: 12, // minutes par voyant en phase verte
+};
 
-const RED_LIGHT_INTERVAL = RED_PHASE_DURATION / LIGHTS_COUNT;
-const GREEN_LIGHT_INTERVAL = GREEN_PHASE_DURATION / LIGHTS_COUNT;
+// CRUCIAL: Même référence temporelle que le site React
+// Online 02/01/2025 01:05:56 = début phase rouge
+const REFERENCE_TIME = new Date('2025-01-02T01:05:56').getTime();
 
 // --- État ---
 let state = {
   phase: "FERME",
-  startTime: Date.now(),
-  endTime: Date.now(),
-  lights: Array(LIGHTS_COUNT).fill("🟥")
+  phaseTimeRemaining: 0,
+  lightTimeRemaining: 0,
+  currentLightIndex: 0,
+  lights: Array(CYCLE_CONFIG.LIGHTS_COUNT).fill("🟥")
 };
 
-// --- Calcul du cycle basé sur l'heure actuelle ---
-function getCurrentCycle() {
-  const now = Date.now();
-  const elapsedInCycle = now % TOTAL_CYCLE;
-
-  if (elapsedInCycle < RED_PHASE_DURATION) {
-    return {
-      phase: "FERME",
-      startTime: now - elapsedInCycle,
-      endTime: now - elapsedInCycle + RED_PHASE_DURATION
-    };
+// --- Calcul de l'état des voyants ---
+function getLightState(index, phase, currentLightIndex) {
+  if (phase === 'red') {
+    if (index < currentLightIndex) return '🟩';
+    if (index === currentLightIndex) return '🟥';
+    return '🟥';
   }
-  if (elapsedInCycle < RED_PHASE_DURATION + GREEN_PHASE_DURATION) {
-    return {
-      phase: "OUVERT",
-      startTime: now - (elapsedInCycle - RED_PHASE_DURATION),
-      endTime: now - (elapsedInCycle - RED_PHASE_DURATION) + GREEN_PHASE_DURATION
-    };
+  if (phase === 'green') {
+    // Inverser l'ordre comme sur le site
+    const reversedCurrentIndex = CYCLE_CONFIG.LIGHTS_COUNT - 1 - currentLightIndex;
+    if (index > reversedCurrentIndex) return '⬛';
+    if (index === reversedCurrentIndex) return '🟩';
+    return '🟩';
   }
-  return {
-    phase: "RESTART",
-    startTime: now - (elapsedInCycle - RED_PHASE_DURATION - GREEN_PHASE_DURATION),
-    endTime: now - (elapsedInCycle - RED_PHASE_DURATION - GREEN_PHASE_DURATION) + BLACK_PHASE_DURATION
-  };
+  return '⬛'; // Phase noire
 }
 
-// --- Mise à jour fluide des voyants ---
-function updateLights() {
-  const now = Date.now();
-  const { phase, startTime } = state;
-  let currentIndex = 0;
-  let progress = 0;
-
-  if (phase === "FERME") {
-    currentIndex = Math.floor((now - startTime) / RED_LIGHT_INTERVAL);
-    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-    progress = ((now - startTime) % RED_LIGHT_INTERVAL) / RED_LIGHT_INTERVAL;
-
-    for (let i = 0; i < LIGHTS_COUNT; i++) {
-      const idx = LIGHTS_COUNT - 1 - i;
-      if (i < currentIndex) state.lights[idx] = "🟩";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "🟩" : "🟥";
-      else state.lights[idx] = "🟥";
-    }
-  } else if (phase === "OUVERT") {
-    currentIndex = Math.floor((now - startTime) / GREEN_LIGHT_INTERVAL);
-    if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-    progress = ((now - startTime) % GREEN_LIGHT_INTERVAL) / GREEN_LIGHT_INTERVAL;
-
-    for (let i = 0; i < LIGHTS_COUNT; i++) {
-      const idx = LIGHTS_COUNT - 1 - i;
-      if (i < currentIndex) state.lights[idx] = "⬛";
-      else if (i === currentIndex && currentIndex < LIGHTS_COUNT) state.lights[idx] = progress > 0.5 ? "⬛" : "🟩";
-      else state.lights[idx] = "🟩";
-    }
-  } else {
-    state.lights = Array(LIGHTS_COUNT).fill("⬛");
-  }
-}
-
-// --- Synchronisation ---
+// --- Synchronisation avec le site React ---
 function syncState() {
-  const cycle = getCurrentCycle();
-  state.phase = cycle.phase;
-  state.startTime = cycle.startTime;
-  state.endTime = cycle.endTime;
-  updateLights();
+  const currentTime = Date.now();
+  
+  // Calculer la position dans le cycle (identique au site)
+  const timeSinceReference = currentTime - REFERENCE_TIME;
+  const cycleDuration = (CYCLE_CONFIG.RED_PHASE_DURATION + 
+                        CYCLE_CONFIG.GREEN_PHASE_DURATION + 
+                        CYCLE_CONFIG.BLACK_PHASE_DURATION) * 60 * 1000;
+  const cyclePosition = timeSinceReference % cycleDuration;
+  const cyclePositionMinutes = cyclePosition / 60000;
+
+  let phase, phaseTimeRemaining, currentLightIndex, lightTimeRemaining;
+
+  if (cyclePositionMinutes < CYCLE_CONFIG.RED_PHASE_DURATION) {
+    // Phase rouge - HANGAR FERMÉ
+    phase = 'red';
+    phaseTimeRemaining = CYCLE_CONFIG.RED_PHASE_DURATION - cyclePositionMinutes;
+    currentLightIndex = Math.floor(cyclePositionMinutes / CYCLE_CONFIG.RED_LIGHT_INTERVAL);
+    lightTimeRemaining = CYCLE_CONFIG.RED_LIGHT_INTERVAL - (cyclePositionMinutes % CYCLE_CONFIG.RED_LIGHT_INTERVAL);
+    state.phase = "FERME";
+  } else if (cyclePositionMinutes < CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION) {
+    // Phase verte - HANGAR OUVERT
+    phase = 'green';
+    const greenPhasePosition = cyclePositionMinutes - CYCLE_CONFIG.RED_PHASE_DURATION;
+    phaseTimeRemaining = CYCLE_CONFIG.GREEN_PHASE_DURATION - greenPhasePosition;
+    currentLightIndex = Math.floor(greenPhasePosition / CYCLE_CONFIG.GREEN_LIGHT_INTERVAL);
+    lightTimeRemaining = CYCLE_CONFIG.GREEN_LIGHT_INTERVAL - (greenPhasePosition % CYCLE_CONFIG.GREEN_LIGHT_INTERVAL);
+    state.phase = "OUVERT";
+  } else {
+    // Phase noire - RESTART
+    phase = 'black';
+    phaseTimeRemaining = (CYCLE_CONFIG.RED_PHASE_DURATION + 
+                         CYCLE_CONFIG.GREEN_PHASE_DURATION + 
+                         CYCLE_CONFIG.BLACK_PHASE_DURATION) - cyclePositionMinutes;
+    currentLightIndex = CYCLE_CONFIG.LIGHTS_COUNT;
+    lightTimeRemaining = phaseTimeRemaining;
+    state.phase = "RESTART";
+  }
+
+  // Mise à jour des voyants
+  for (let i = 0; i < CYCLE_CONFIG.LIGHTS_COUNT; i++) {
+    state.lights[i] = getLightState(i, phase, currentLightIndex);
+  }
+
+  state.phaseTimeRemaining = phaseTimeRemaining;
+  state.lightTimeRemaining = lightTimeRemaining;
+  state.currentLightIndex = currentLightIndex;
+}
+
+// --- Formatage du temps ---
+function formatTime(minutes, showSeconds = false) {
+  const hrs = Math.floor(minutes / 60);
+  const mins = Math.floor(minutes % 60);
+  const secs = Math.floor((minutes % 1) * 60);
+  
+  if (showSeconds) {
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${hrs}h${mins.toString().padStart(2, '0')}`;
 }
 
 // --- Embed Discord ---
 function buildEmbed() {
-  const remainingMs = state.endTime - Date.now();
-  const min = Math.floor(remainingMs / 60000);
-  const sec = Math.floor((remainingMs % 60000) / 1000);
+  const countdown = state.phase === "RESTART" 
+    ? formatTime(state.phaseTimeRemaining, true)
+    : formatTime(state.phaseTimeRemaining, false);
 
-  const countdown = state.phase === "FERME" ? `${min} min` : `${min} min ${sec}s`;
+  const statusEmoji = {
+    "FERME": "🔴",
+    "OUVERT": "🟢",
+    "RESTART": "🟡"
+  };
+
+  const embedColor = {
+    "FERME": "Red",
+    "OUVERT": "Green",
+    "RESTART": "Yellow"
+  };
 
   return new EmbedBuilder()
-    .setTitle("Executive Hangar Status :")
-    .setColor(state.phase === "FERME" ? "Red" : state.phase === "OUVERT" ? "Green" : "Yellow")
+    .setTitle("Executive Hangar Status")
+    .setColor(embedColor[state.phase])
     .addFields(
-      { name: "Voyants :", value: state.lights.join(" "), inline: false },
-      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : state.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown }
-    );
+      { 
+        name: "Voyants", 
+        value: state.lights.join(" "), 
+        inline: false 
+      },
+      { 
+        name: `HANGAR ${state.phase} ${statusEmoji[state.phase]}`, 
+        value: `⏱️ ${countdown}`,
+        inline: false
+      }
+    )
+    .setTimestamp()
+    .setFooter({ text: 'Synchronisé avec le site PYAM' });
 }
 
 // --- Client Discord ---
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ 
+  intents: [GatewayIntentBits.Guilds] 
+});
+
 let messageInstance;
 
 client.once("ready", async () => {
-  console.log(`✅ Connecté en tant que ${client.user.tag}`);
+  console.log(`✅ Bot Discord connecté: ${client.user.tag}`);
+  console.log(`📍 Référence temporelle: ${new Date(REFERENCE_TIME).toLocaleString('fr-FR')}`);
+  
+  // Synchronisation initiale
   syncState();
+  console.log(`🔄 État initial: Phase ${state.phase}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  messageInstance = await channel.send({ embeds: [buildEmbed()] });
+  try {
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    messageInstance = await channel.send({ embeds: [buildEmbed()] });
+    console.log(`✅ Message initial envoyé`);
 
-  setInterval(() => {
-    syncState();
-    if (messageInstance) messageInstance.edit({ embeds: [buildEmbed()] });
-  }, 1000);
+    // Mise à jour toutes les secondes
+    setInterval(() => {
+      syncState();
+      if (messageInstance) {
+        messageInstance.edit({ embeds: [buildEmbed()] }).catch(err => {
+          console.error("❌ Erreur lors de la mise à jour du message:", err);
+        });
+      }
+    }, 1000);
+
+  } catch (error) {
+    console.error("❌ Erreur lors de l'initialisation:", error);
+  }
 });
 
-client.login(process.env.TOKEN);
+client.on("error", (error) => {
+  console.error("❌ Erreur Discord:", error);
+});
 
-
-
-
+client.login(TOKEN).catch(err => {
+  console.error("❌ Erreur de connexion:", err);
+});
