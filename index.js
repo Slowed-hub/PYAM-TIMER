@@ -1,163 +1,221 @@
-require("dotenv").config();
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+require('dotenv').config();
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 
-const TOKEN = process.env.TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-
-// --- Vérification des variables d'environnement ---
-if (!TOKEN || !CHANNEL_ID) {
-  console.error("Erreur : DISCORD_TOKEN ou CHANNEL_ID manquant dans les variables d'environnement.");
-  process.exit(1);
-}
-
-// --- Configuration du cycle ---
 const CYCLE_CONFIG = {
-  RED_PHASE_DURATION: 120 * 60 * 1000, // 120 minutes
-  GREEN_PHASE_DURATION: 60 * 60 * 1000, // 60 minutes
-  BLACK_PHASE_DURATION: 5 * 60 * 1000, // 5 minutes
+  RED_PHASE_DURATION: 120,
+  GREEN_PHASE_DURATION: 60,
+  BLACK_PHASE_DURATION: 5,
   LIGHTS_COUNT: 5,
-  RED_LIGHT_INTERVAL: 24 * 60 * 1000, // 24 minutes
-  GREEN_LIGHT_INTERVAL: 12 * 60 * 1000, // 12 minutes
+  RED_LIGHT_INTERVAL: 24,
+  GREEN_LIGHT_INTERVAL: 12,
 };
 
-const REFERENCE_TIME = new Date("2025-01-02T01:05:56Z").getTime();
-const TOTAL_CYCLE = CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION + CYCLE_CONFIG.BLACK_PHASE_DURATION;
+const REFERENCE_TIME = new Date('2025-01-02T01:05:56Z').getTime();
 
-// --- État ---
-let state = {
-  phase: "FERME",
-  startTime: Date.now(),
-  endTime: Date.now(),
-  lights: Array(CYCLE_CONFIG.LIGHTS_COUNT).fill("🟥"),
-};
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
 
-// --- Calcul de l'état des voyants ---
 function getLightState(index, phase, currentLightIndex) {
-  if (phase === "FERME") {
-    if (index < currentLightIndex) return "🟩";
-    return "🟥";
+  if (phase === 'red') {
+    if (index < currentLightIndex) return 'green';
+    if (index === currentLightIndex) return 'red';
+    return 'red';
   }
-  if (phase === "OUVERT") {
+  if (phase === 'green') {
     const reversedCurrentIndex = CYCLE_CONFIG.LIGHTS_COUNT - 1 - currentLightIndex;
-    if (index > reversedCurrentIndex) return "⬛";
-    return "🟩";
+    if (index > reversedCurrentIndex) return 'black';
+    if (index === reversedCurrentIndex) return 'green';
+    return 'green';
   }
-  return "⬛";
+  return 'black';
 }
 
-// --- Formatage du temps ---
 function formatTime(minutes, showSeconds = false) {
   const hrs = Math.floor(minutes / 60);
   const mins = Math.floor(minutes % 60);
   const secs = Math.floor((minutes % 1) * 60);
-  return showSeconds
-    ? `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-    : `${hrs}h${mins.toString().padStart(2, "0")}`;
+
+  if (showSeconds) {
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${hrs}h${mins.toString().padStart(2, '0')}`;
 }
 
-// --- Calcul du cycle basé sur l'heure actuelle ---
-function getCurrentCycle() {
-  const now = Date.now();
-  const timeSinceReference = now - REFERENCE_TIME;
-  const cyclePosition = (timeSinceReference % TOTAL_CYCLE + TOTAL_CYCLE) % TOTAL_CYCLE;
+function getTimerState() {
+  const currentTime = Date.now();
+  const timeSinceReference = currentTime - REFERENCE_TIME;
+  const cycleDuration = (CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION + CYCLE_CONFIG.BLACK_PHASE_DURATION) * 60 * 1000;
+  const cyclePosition = timeSinceReference % cycleDuration;
   const cyclePositionMinutes = cyclePosition / 60000;
 
-  let phase, phaseTimeRemaining, currentLightIndex;
+  let phase, phaseTimeRemaining, currentLightIndex, lightTimeRemaining, statusText, statusColor;
 
-  if (cyclePositionMinutes < CYCLE_CONFIG.RED_PHASE_DURATION / 60000) {
-    phase = "FERME";
-    phaseTimeRemaining = CYCLE_CONFIG.RED_PHASE_DURATION / 60000 - cyclePositionMinutes;
-    currentLightIndex = Math.floor(cyclePositionMinutes / (CYCLE_CONFIG.RED_LIGHT_INTERVAL / 60000));
-  } else if (cyclePositionMinutes < (CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION) / 60000) {
-    phase = "OUVERT";
-    const greenPhasePosition = cyclePositionMinutes - CYCLE_CONFIG.RED_PHASE_DURATION / 60000;
-    phaseTimeRemaining = CYCLE_CONFIG.GREEN_PHASE_DURATION / 60000 - greenPhasePosition;
-    currentLightIndex = Math.floor(greenPhasePosition / (CYCLE_CONFIG.GREEN_LIGHT_INTERVAL / 60000));
+  if (cyclePositionMinutes < CYCLE_CONFIG.RED_PHASE_DURATION) {
+    phase = 'red';
+    phaseTimeRemaining = CYCLE_CONFIG.RED_PHASE_DURATION - cyclePositionMinutes;
+    currentLightIndex = Math.floor(cyclePositionMinutes / CYCLE_CONFIG.RED_LIGHT_INTERVAL);
+    lightTimeRemaining = CYCLE_CONFIG.RED_LIGHT_INTERVAL - (cyclePositionMinutes % CYCLE_CONFIG.RED_LIGHT_INTERVAL);
+    statusText = 'HANGAR FERMÉ';
+    statusColor = 0xEF4444;
+  } else if (cyclePositionMinutes < CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION) {
+    phase = 'green';
+    const greenPhasePosition = cyclePositionMinutes - CYCLE_CONFIG.RED_PHASE_DURATION;
+    phaseTimeRemaining = CYCLE_CONFIG.GREEN_PHASE_DURATION - greenPhasePosition;
+    currentLightIndex = Math.floor(greenPhasePosition / CYCLE_CONFIG.GREEN_LIGHT_INTERVAL);
+    lightTimeRemaining = CYCLE_CONFIG.GREEN_LIGHT_INTERVAL - (greenPhasePosition % CYCLE_CONFIG.GREEN_LIGHT_INTERVAL);
+    statusText = 'HANGAR OUVERT';
+    statusColor = 0x10B981;
   } else {
-    phase = "RESTART";
-    phaseTimeRemaining = (CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION + CYCLE_CONFIG.BLACK_PHASE_DURATION) / 60000 - cyclePositionMinutes;
+    phase = 'black';
+    phaseTimeRemaining = (CYCLE_CONFIG.RED_PHASE_DURATION + CYCLE_CONFIG.GREEN_PHASE_DURATION + CYCLE_CONFIG.BLACK_PHASE_DURATION) - cyclePositionMinutes;
     currentLightIndex = CYCLE_CONFIG.LIGHTS_COUNT;
+    lightTimeRemaining = phaseTimeRemaining;
+    statusText = 'RESTART';
+    statusColor = 0xF59E0B;
   }
 
-  return { phase, phaseTimeRemaining, currentLightIndex };
+  const lights = Array.from({ length: CYCLE_CONFIG.LIGHTS_COUNT }).map((_, index) => {
+    const state = getLightState(index, phase, currentLightIndex);
+    const emoji = state === 'red' ? '🔴' : state === 'green' ? '🟢' : '⚫';
+    return emoji;
+  });
+
+  return {
+    phase,
+    phaseTimeRemaining,
+    currentLightIndex,
+    lightTimeRemaining,
+    statusText,
+    statusColor,
+    lights,
+  };
 }
 
-// --- Mise à jour des voyants ---
-function updateLights(phase, currentLightIndex) {
-  state.lights = Array(CYCLE_CONFIG.LIGHTS_COUNT)
-    .fill()
-    .map((_, index) => getLightState(index, phase, currentLightIndex));
-}
+function createTimerEmbed() {
+  const state = getTimerState();
 
-// --- Synchronisation ---
-function syncState() {
-  try {
-    const { phase, phaseTimeRemaining, currentLightIndex } = getCurrentCycle();
-    state.phase = phase;
-    state.startTime = Date.now() - (cyclePositionMinutes * 60000);
-    state.endTime = Date.now() + (phaseTimeRemaining * 60000);
-    updateLights(phase, currentLightIndex);
-  } catch (error) {
-    console.error("Erreur dans syncState:", error);
-  }
-}
-
-// --- Embed Discord ---
-function buildEmbed() {
-  const { phase, phaseTimeRemaining } = getCurrentCycle();
-  const countdown = phase === "RESTART" ? formatTime(phaseTimeRemaining, true) : formatTime(phaseTimeRemaining, false);
-
-  return new EmbedBuilder()
-    .setTitle("Statut du Hangar Exécutif :")
-    .setColor(phase === "FERME" ? "Red" : phase === "OUVERT" ? "Green" : "Yellow")
+  const embed = new EmbedBuilder()
+    .setColor(state.statusColor)
+    .setTitle('⏱️ Timer Hangar PYAM')
+    .setDescription(`**Statut:** ${state.statusText}`)
     .addFields(
-      { name: "Voyants :", value: state.lights.join(" "), inline: false },
       {
-        name: phase === "FERME" ? "HANGAR FERMÉ 🔴" : phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡",
-        value: countdown,
+        name: '🕐 Temps restant phase',
+        value: `\`${state.phase === 'black' ? formatTime(state.phaseTimeRemaining, true) : formatTime(state.phaseTimeRemaining, false)}\``,
+        inline: true
+      },
+      {
+        name: '💡 Voyant actif',
+        value: `\`${formatTime(state.lightTimeRemaining, true)}\``,
+        inline: true
+      },
+      {
+        name: '🚦 Voyants',
+        value: state.lights.join(' '),
+        inline: false
       }
-    );
+    )
+    .setTimestamp()
+    .setFooter({ text: '404 Unit - Timer synchronisé' });
+
+  return embed;
 }
 
-// --- Client Discord ---
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+let updateInterval = null;
+let lastMessageId = null;
+let channelId = null;
 
-client.on("error", (error) => {
-  console.error("Erreur du client Discord:", error);
+async function startAutoUpdate(channel) {
+  if (updateInterval) {
+    clearInterval(updateInterval);
+  }
+
+  channelId = channel.id;
+
+  const message = await channel.send({ embeds: [createTimerEmbed()] });
+  lastMessageId = message.id;
+
+  updateInterval = setInterval(async () => {
+    try {
+      const fetchedChannel = await client.channels.fetch(channelId);
+      const fetchedMessage = await fetchedChannel.messages.fetch(lastMessageId);
+      await fetchedMessage.edit({ embeds: [createTimerEmbed()] });
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour:', error);
+      if (error.code === 10008) {
+        clearInterval(updateInterval);
+        const fetchedChannel = await client.channels.fetch(channelId);
+        const newMessage = await fetchedChannel.send({ embeds: [createTimerEmbed()] });
+        lastMessageId = newMessage.id;
+        startAutoUpdate(fetchedChannel);
+      }
+    }
+  }, 1000);
+}
+
+client.once('ready', () => {
+  console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
+  console.log(`📅 Temps de référence: ${new Date(REFERENCE_TIME).toISOString()}`);
+  console.log(`⏰ Le bot est maintenant en ligne et prêt à recevoir des commandes!`);
 });
 
-client.once("ready", async () => {
-  console.log(`✅ Connecté en tant que ${client.user.tag}`);
-  try {
-    syncState();
-    const channel = await client.channels.fetch(CHANNEL_ID).catch((error) => {
-      console.error("Erreur lors de la récupération du canal:", error);
-      throw error;
-    });
-    const messageInstance = await channel.send({ embeds: [buildEmbed()] }).catch((error) => {
-      console.error("Erreur lors de l'envoi du message:", error);
-      throw error;
-    });
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
 
-    setInterval(async () => {
-      try {
-        syncState();
-        await messageInstance.edit({ embeds: [buildEmbed()] }).catch((error) => {
-          console.error("Erreur lors de la modification du message:", error);
-        });
-      } catch (error) {
-        console.error("Erreur dans l'intervalle de mise à jour:", error);
-      }
-    }, 1000);
-  } catch (error) {
-    console.error("Erreur dans l'événement ready:", error);
+  if (message.content === '!timer') {
+    await message.reply({ embeds: [createTimerEmbed()] });
+  }
+
+  if (message.content === '!timer-auto') {
+    if (updateInterval) {
+      clearInterval(updateInterval);
+      updateInterval = null;
+      await message.reply('⏹️ Mise à jour automatique arrêtée.');
+    } else {
+      await startAutoUpdate(message.channel);
+      await message.reply('▶️ Mise à jour automatique démarrée (1 seconde).');
+    }
+  }
+
+  if (message.content === '!timer-help') {
+    const helpEmbed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle('📖 Commandes du Timer Hangar PYAM')
+      .setDescription('Liste des commandes disponibles:')
+      .addFields(
+        { name: '!timer', value: 'Affiche l\'état actuel du timer', inline: false },
+        { name: '!timer-auto', value: 'Active/désactive la mise à jour automatique (1 sec)', inline: false },
+        { name: '!timer-help', value: 'Affiche ce message d\'aide', inline: false }
+      )
+      .setFooter({ text: '404 Unit' });
+
+    await message.reply({ embeds: [helpEmbed] });
   }
 });
 
-client.login(TOKEN).catch((error) => {
-  console.error("Erreur lors de la connexion au client Discord:", error);
+client.on('error', (error) => {
+  console.error('Erreur Discord:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Rejet de promesse non géré:', error);
+});
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+
+if (!DISCORD_TOKEN) {
+  console.error('❌ ERREUR: Le token Discord (DISCORD_TOKEN) n\'est pas défini dans les variables d\'environnement!');
+  process.exit(1);
+}
+
+client.login(DISCORD_TOKEN).catch((error) => {
+  console.error('❌ Échec de la connexion au bot Discord:', error);
   process.exit(1);
 });
-
 
 
