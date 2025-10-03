@@ -1,125 +1,176 @@
-require("dotenv").config();
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
-const fs = require("fs");
-const express = require("express");
-
-// --- Serveur HTTP pour Render ---
+const { Client, GatewayIntentBits } = require('discord.js');
+const fs = require('fs').promises;
+const express = require('express');
 const app = express();
-const PORT = process.env.PORT || 10000;
-app.get("/", (req, res) => res.send("Bot Discord actif ✅"));
-app.listen(PORT, () => console.log(`🌐 Serveur HTTP actif sur le port ${PORT}`));
+const port = process.env.PORT || 3000;
 
-// --- Variables Discord ---
-const TOKEN = process.env.DISCORD_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-
-// --- Paramètres du cycle ---
-const LIGHTS_COUNT = 5;
-const cycles = JSON.parse(fs.readFileSync("./cycles.json", "utf8"));
-
-// --- État ---
-let state = {
-  phase: "FERME",
-  startTime: Date.now(),
-  endTime: Date.now(),
-  lights: Array(LIGHTS_COUNT).fill("🟥"),
-  currentCycleIndex: 0
-};
-
-// --- Récupérer le cycle actuel depuis le JSON ---
-function getCurrentCycleFromJSON() {
-  const now = Date.now();
-  for (let i = 0; i < cycles.length; i++) {
-    const start = new Date(cycles[i].timestamp).getTime();
-    if (cycles[i].status === "Online") {
-      const end = new Date(cycles[i + 1]?.timestamp || now).getTime();
-      if (now >= start && now < end) {
-        return { phase: "OUVERT", startTime: start, endTime: end, index: i };
-      }
-    }
-    if (cycles[i].status === "Offline") {
-      const end = new Date(cycles[i + 1]?.timestamp || now).getTime();
-      if (now >= start && now < end) {
-        return { phase: "FERME", startTime: start, endTime: end, index: i };
-      }
-    }
-  }
-  // Si aucune correspondance, retourner le dernier cycle
-  const last = cycles[cycles.length - 1];
-  return {
-    phase: last.status === "Online" ? "OUVERT" : "FERME",
-    startTime: new Date(last.timestamp).getTime(),
-    endTime: new Date(last.timestamp).getTime() + 3600000, // fallback 1h
-    index: cycles.length - 1
-  };
-}
-
-// --- Mise à jour fluide des voyants ---
-function updateLights() {
-  const now = Date.now();
-  const { phase, startTime, endTime } = state;
-  const duration = endTime - startTime;
-  const interval = duration / LIGHTS_COUNT;
-  const elapsed = now - startTime;
-
-  let currentIndex = Math.floor(elapsed / interval);
-  if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
-
-  for (let i = 0; i < LIGHTS_COUNT; i++) {
-    const idx = LIGHTS_COUNT - 1 - i;
-    if (i < currentIndex) state.lights[idx] = phase === "OUVERT" ? "🟩" : "🟥";
-    else state.lights[idx] = "⬛";
-  }
-}
-
-// --- Synchronisation ---
-function syncState() {
-  const cycle = getCurrentCycleFromJSON();
-  state.phase = cycle.phase;
-  state.startTime = cycle.startTime;
-  state.endTime = cycle.endTime;
-  state.currentCycleIndex = cycle.index;
-  updateLights();
-}
-
-// --- Embed Discord ---
-function buildEmbed() {
-  const remainingMs = state.endTime - Date.now();
-  const min = Math.floor(remainingMs / 60000);
-  const sec = Math.floor((remainingMs % 60000) / 1000);
-  const countdown = `${min} min ${sec}s`;
-
-  return new EmbedBuilder()
-    .setTitle("Executive Hangar Status :")
-    .setColor(state.phase === "FERME" ? "Red" : "Green")
-    .addFields(
-      { name: "Voyants :", value: state.lights.join(" "), inline: false },
-      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : "HANGAR OUVERT 🟢", value: countdown }
-    );
-}
-
-// --- Client Discord ---
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-let messageInstance;
-
-client.once("ready", async () => {
-  console.log(`✅ Connecté en tant que ${client.user.tag}`);
-  syncState();
-
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  messageInstance = await channel.send({ embeds: [buildEmbed()] });
-
-  setInterval(() => {
-    syncState();
-    if (messageInstance) messageInstance.edit({ embeds: [buildEmbed()] });
-  }, 1000);
+// Configuration du client Discord
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
+// Variables globales
+let currentStatus = 'OFFLINE';
+let currentPhaseStart = null;
+let lights = ['🔴', '🔴', '🔴', '🔴', '🔴'];
+let timerMessageId = null;
+const channelId = 'YOUR_CHANNEL_ID'; // Remplacez par l'ID du canal Discord
+const cyclesFile = 'cycles.json';
+const cycleDurations = {
+  OFFLINE: 2 * 60 * 60 * 1000, // 2 heures
+  ONLINE: 1 * 60 * 60 * 1000, // 1 heure
+  RESTART: 5 * 60 * 1000 // 5 minutes
+};
+
+// Charger les cycles depuis cycles.json
+async function loadCycles() {
+  try {
+    const data = await fs.readFile(cyclesFile, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Erreur lors du chargement de cycles.json:', error);
+    return [];
+  }
+}
+
+// Trouver le prochain changement de statut
+function getNextStatusChange(cycles, currentTime) {
+  const now = new Date(currentTime);
+  let nextChange = null;
+  let nextStatus = null;
+
+  for (const cycle of cycles) {
+    const cycleTime = new Date(cycle.timestamp);
+    if (cycleTime > now && (!nextChange || cycleTime < new Date(nextChange.timestamp))) {
+      nextChange = cycle;
+      nextStatus = cycle.status;
+    }
+  }
+
+  return { nextChange, nextStatus };
+}
+
+// Formatter le temps restant
+function formatTimeRemaining(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainingSeconds = seconds % 60;
+  const remainingMinutes = minutes % 60;
+
+  if (currentStatus === 'OFFLINE') {
+    return `${hours}h ${remainingMinutes}m`;
+  } else {
+    return `${remainingMinutes}m ${remainingSeconds}s`;
+  }
+}
+
+// Mettre à jour les voyants
+function updateLights(phaseProgress) {
+  if (currentStatus === 'OFFLINE') {
+    const lightsToTurnGreen = Math.floor(phaseProgress / (24 * 60 * 1000)); // 24 minutes par voyant
+    lights = lights.map((light, index) => index < lightsToTurnGreen ? '🟢' : '🔴');
+  } else if (currentStatus === 'ONLINE') {
+    const lightsToTurnOff = Math.floor(phaseProgress / (12 * 60 * 1000)); // 12 minutes par voyant
+    lights = lights.map((light, index) => index >= (5 - lightsToTurnOff) ? '⬛' : '🟢');
+  } else if (currentStatus === 'RESTART') {
+    lights = ['⬛', '⬛', '⬛', '⬛', '⬛'];
+  }
+}
+
+// Générer le message Discord
+function generateMessage(remainingTime) {
+  const statusText = {
+    OFFLINE: 'HANGAR CLOSED 🔴',
+    ONLINE: 'HANGAR OPEN 🟢',
+    RESTART: 'RESTART 🟡'
+  };
+  const timerText = {
+    OFFLINE: `Opening in: ${formatTimeRemaining(remainingTime)}`,
+    ONLINE: `Close in: ${formatTimeRemaining(remainingTime)}`,
+    RESTART: `Restart in: ${formatTimeRemaining(remainingTime)}`
+  };
+
+  return `**EXECUTIVE HANGAR STATUS :**\n\n${lights.join(' ')}\n${statusText[currentStatus]}\n${timerText[currentStatus]}`;
+}
+
+// Mettre à jour le minuteur
+async function updateTimer() {
+  const now = new Date();
+  const cycles = await loadCycles();
+  const { nextChange, nextStatus } = getNextStatusChange(cycles, now);
+
+  if (!nextChange) {
+    console.log('Aucun changement de statut prévu.');
+    return;
+  }
+
+  const nextChangeTime = new Date(nextChange.timestamp);
+  const timeUntilNextChange = nextChangeTime - now;
+
+  // Déterminer la phase actuelle
+  if (currentStatus === 'OFFLINE' && timeUntilNextChange <= 0 && nextStatus === 'Online') {
+    currentStatus = 'ONLINE';
+    currentPhaseStart = now;
+  } else if (currentStatus === 'ONLINE' && timeUntilNextChange <= 0 && nextStatus === 'Offline') {
+    currentStatus = 'RESTART';
+    currentPhaseStart = now;
+  } else if (currentStatus === 'RESTART' && (now - currentPhaseStart) >= cycleDurations.RESTART) {
+    currentStatus = 'OFFLINE';
+    currentPhaseStart = now;
+  }
+
+  // Calculer le temps restant dans la phase actuelle
+  const phaseProgress = now - currentPhaseStart;
+  let remainingTime;
+  if (currentStatus === 'RESTART') {
+    remainingTime = cycleDurations.RESTART - phaseProgress;
+  } else if (currentStatus === 'ONLINE') {
+    remainingTime = cycleDurations.ONLINE - phaseProgress;
+  } else {
+    remainingTime = cycleDurations.OFFLINE - phaseProgress;
+  }
+
+  // Mettre à jour les voyants
+  updateLights(phaseProgress);
+
+  // Envoyer ou mettre à jour le message Discord
+  const channel = await client.channels.fetch(channelId);
+  const messageContent = generateMessage(remainingTime);
+
+  if (timerMessageId) {
+    try {
+      const message = await channel.messages.fetch(timerMessageId);
+      await message.edit(messageContent);
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour du message:', error);
+      const newMessage = await channel.send(messageContent);
+      timerMessageId = newMessage.id;
+    }
+  } else {
+    const newMessage = await channel.send(messageContent);
+    timerMessageId = newMessage.id;
+  }
+}
+
+// Événement de démarrage du bot
+client.once('ready', async () => {
+  console.log(`Connecté en tant que ${client.user.tag}`);
+  currentPhaseStart = new Date();
+  setInterval(updateTimer, 1000); // Mettre à jour toutes les secondes
+});
+
+// Serveur HTTP pour Render
+app.get('/', (req, res) => {
+  res.send('Bot Discord est en cours d\'exécution !');
+});
+
+app.listen(port, () => {
+  console.log(`Serveur HTTP en écoute sur le port ${port}`);
+});
+
+// Connexion du bot Discord
 client.login(process.env.DISCORD_TOKEN);
-
-
-
-
 
 
 
