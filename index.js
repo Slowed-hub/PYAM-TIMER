@@ -1,11 +1,8 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
-const fs = require("fs");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
-
-const DATA_FILE = "timer.json";
 
 // --- Durées du cycle ---
 const LIGHTS_COUNT = 5;
@@ -25,28 +22,10 @@ let state = {
   lights: Array(LIGHTS_COUNT).fill("🟥")
 };
 
-// --- Persistance minimale (voyants uniquement) ---
-if (fs.existsSync(DATA_FILE)) {
-  try {
-    const data = fs.readFileSync(DATA_FILE, "utf-8");
-    if (data) state = { ...state, ...JSON.parse(data) };
-  } catch (err) {
-    console.error("Erreur lecture JSON :", err);
-  }
-}
-
-function saveState() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ lights: state.lights }, null, 2));
-  } catch (err) {
-    console.error("Erreur écriture JSON :", err);
-  }
-}
-
 // --- Calcul du cycle basé sur l'heure actuelle ---
 function getCurrentCycle() {
   const now = Date.now();
-  const elapsedInCycle = now % TOTAL_CYCLE; // toujours entre 0 et TOTAL_CYCLE
+  const elapsedInCycle = now % TOTAL_CYCLE;
 
   if (elapsedInCycle < RED_PHASE_DURATION) {
     return {
@@ -125,9 +104,7 @@ function buildEmbed() {
     .setColor(state.phase === "FERME" ? "Red" : state.phase === "OUVERT" ? "Green" : "Yellow")
     .addFields(
       { name: "Voyants :", value: state.lights.join(" "), inline: false },
-      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : state.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown },
-      { name: "Heure serveur (UTC)", value: new Date().toISOString(), inline: false },
-      { name: "Heure serveur (locale)", value: new Date().toLocaleString(), inline: false }
+      { name: state.phase === "FERME" ? "HANGAR FERMÉ 🔴" : state.phase === "OUVERT" ? "HANGAR OUVERT 🟢" : "RESTART 🟡", value: countdown }
     );
 }
 
@@ -138,19 +115,18 @@ let messageInstance;
 client.once("ready", async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
   syncState();
-  saveState();
 
   const channel = await client.channels.fetch(CHANNEL_ID);
   messageInstance = await channel.send({ embeds: [buildEmbed()] });
 
   setInterval(() => {
     syncState();
-    saveState();
     if (messageInstance) messageInstance.edit({ embeds: [buildEmbed()] });
   }, 1000);
 });
 
 client.login(process.env.TOKEN);
+
 
 
 
