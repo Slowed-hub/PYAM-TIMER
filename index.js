@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 
-const TOKEN = process.env.DISCORD_TOKEN;
+const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
 // --- Vérification des variables d'environnement ---
@@ -158,5 +158,6 @@ client.login(TOKEN).catch((error) => {
   console.error("Erreur lors de la connexion au client Discord:", error);
   process.exit(1);
 });
+
 
 
