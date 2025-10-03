@@ -14,7 +14,7 @@ let currentStatus = 'OFFLINE';
 let currentPhaseStart = null;
 let lights = ['🔴', '🔴', '🔴', '🔴', '🔴'];
 let timerMessageId = null;
-const channelId = 'YOUR_CHANNEL_ID'; // Remplacez par l'ID du canal Discord
+const channelId = '1423026396741107772'; // Remplacez par l'ID du canal Discord
 const cyclesFile = 'cycles.json';
 const cycleDurations = {
   OFFLINE: 2 * 60 * 60 * 1000, // 2 heures
@@ -171,6 +171,7 @@ app.listen(port, () => {
 
 // Connexion du bot Discord
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
