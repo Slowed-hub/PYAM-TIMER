@@ -13,57 +13,72 @@ app.listen(PORT, () => console.log(`🌐 Serveur HTTP actif sur le port ${PORT}`
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// --- Charger le planning exact ---
-const rawCycles = fs.readFileSync("./cycles.json");
-const cycles = JSON.parse(rawCycles).map(c => ({
-  phase: c.phase,
-  startTime: new Date(c.start).getTime(),
-  endTime: new Date(c.end).getTime()
-}));
-
+// --- Paramètres du cycle ---
 const LIGHTS_COUNT = 5;
+const cycles = JSON.parse(fs.readFileSync("./cycles.json", "utf8"));
 
 // --- État ---
 let state = {
   phase: "FERME",
   startTime: Date.now(),
   endTime: Date.now(),
-  lights: Array(LIGHTS_COUNT).fill("⬛")
+  lights: Array(LIGHTS_COUNT).fill("🟥"),
+  currentCycleIndex: 0
 };
 
-// --- Détection du cycle courant ---
-function getCurrentCycle() {
+// --- Récupérer le cycle actuel depuis le JSON ---
+function getCurrentCycleFromJSON() {
   const now = Date.now();
-  for (const c of cycles) {
-    if (now >= c.startTime && now < c.endTime) return c;
+  for (let i = 0; i < cycles.length; i++) {
+    const start = new Date(cycles[i].timestamp).getTime();
+    if (cycles[i].status === "Online") {
+      const end = new Date(cycles[i + 1]?.timestamp || now).getTime();
+      if (now >= start && now < end) {
+        return { phase: "OUVERT", startTime: start, endTime: end, index: i };
+      }
+    }
+    if (cycles[i].status === "Offline") {
+      const end = new Date(cycles[i + 1]?.timestamp || now).getTime();
+      if (now >= start && now < end) {
+        return { phase: "FERME", startTime: start, endTime: end, index: i };
+      }
+    }
   }
-  return cycles[cycles.length - 1]; // si on est après le dernier cycle
+  // Si aucune correspondance, retourner le dernier cycle
+  const last = cycles[cycles.length - 1];
+  return {
+    phase: last.status === "Online" ? "OUVERT" : "FERME",
+    startTime: new Date(last.timestamp).getTime(),
+    endTime: new Date(last.timestamp).getTime() + 3600000, // fallback 1h
+    index: cycles.length - 1
+  };
 }
 
-// --- Mise à jour des voyants ---
+// --- Mise à jour fluide des voyants ---
 function updateLights() {
   const now = Date.now();
   const { phase, startTime, endTime } = state;
   const duration = endTime - startTime;
   const interval = duration / LIGHTS_COUNT;
-  let currentIndex = Math.floor((now - startTime) / interval);
-  if (currentIndex >= LIGHTS_COUNT) currentIndex = LIGHTS_COUNT - 1;
-  const progress = ((now - startTime) % interval) / interval;
+  const elapsed = now - startTime;
+
+  let currentIndex = Math.floor(elapsed / interval);
+  if (currentIndex > LIGHTS_COUNT) currentIndex = LIGHTS_COUNT;
 
   for (let i = 0; i < LIGHTS_COUNT; i++) {
     const idx = LIGHTS_COUNT - 1 - i;
     if (i < currentIndex) state.lights[idx] = phase === "OUVERT" ? "🟩" : "🟥";
-    else if (i === currentIndex) state.lights[idx] = progress > 0.5 ? (phase === "OUVERT" ? "🟩" : "🟥") : "⬛";
     else state.lights[idx] = "⬛";
   }
 }
 
 // --- Synchronisation ---
 function syncState() {
-  const cycle = getCurrentCycle();
+  const cycle = getCurrentCycleFromJSON();
   state.phase = cycle.phase;
   state.startTime = cycle.startTime;
   state.endTime = cycle.endTime;
+  state.currentCycleIndex = cycle.index;
   updateLights();
 }
 
@@ -101,6 +116,7 @@ client.once("ready", async () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
 
 
 
